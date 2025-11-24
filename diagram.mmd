@@ -1,0 +1,64 @@
+flowchart TD
+    subgraph UI_Layer[UI Layer]
+        A[LoginEmailVC]
+        B[LoginOTPVC]
+        C[RegularLoginOTP]
+        D[Login2FAOTPVC]
+        E[TermsOfServiceVC / CreateNewOTP]
+        UI_Home[CustomTabBarVC / Home]
+    end
+
+    subgraph Service_Layer[Service Layer]
+        F[DataHandlerService]
+    end
+
+    subgraph Network_Layer[Network Layer]
+        G[NetworkManager]
+    end
+
+    subgraph Backend[Scribe APIs]
+        H[/auth/check-email]
+        I[/auth/login]
+        J[/auth/login-2fa]
+    end
+
+    subgraph Persistence[Client Persistence]
+        K[Defaults.shared]
+        L[KeychainHelper]
+        M[Realm migration + Consult cache]
+        N[Intercom.loginUser]
+    end
+
+    %% Email flow
+    A -->|email payload| F
+    F -->|checkEmailAuth| G
+    G -->|POST /auth/check-email| H
+    H -->|200 + detail| F
+    F -->|Defaults.userEmail| K
+    F -->|navigate| B
+
+    %% OTP flow
+    B -->|otp| F
+    C -->|saved otp / biometrics| F
+    F -->|verifyOTP / checkLogin| G
+    G -->|POST /auth/login| I
+    I -->|200 + token + settings| F
+    F -->|persist session| K
+    F -->|store plain OTP| L
+    F -->|seed consult data| M
+    F -->|register user| N
+    F -->|routing| E
+
+    %% 2FA flow
+    I -->|202 2FA required| F
+    F -->|push 2FA VC| D
+    D -->|otp + hash| F
+    F -->|verify2FA| G
+    G -->|POST /auth/login-2fa| J
+    J -->|200 + token| F
+    F -->|same persistence pipeline| K
+
+    %% TOS logic
+    E -->|TOS accepted or PIN reset| C
+    E -->|TOS done| B
+    E -->|Compliance satisfied| UI_Home
