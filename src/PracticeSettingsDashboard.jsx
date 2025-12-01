@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Settings, Users, ChevronRight, Search, Shield, X, RotateCcw } from 'lucide-react';
 
 const PracticeSettingsDashboard = () => {
+  // Master User / Role Management
+  const MASTER_USER_EMAIL = 'ops@marvix.com';
+  const [currentUserEmail, setCurrentUserEmail] = useState('pm@practice.com');
+
+  // Helper to check if current user is master user
+  const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
+
   const [currentView, setCurrentView] = useState('settings');
   const [selectedModule, setSelectedModule] = useState('note-settings');
   const [searchTerm, setSearchTerm] = useState('');
@@ -90,7 +97,7 @@ const PracticeSettingsDashboard = () => {
               userId,
               userName: user.name,
               value: override.value,
-              lockState: override.lockState || 'unlocked'
+              pmLockState: override.pmLockState || 'unlocked'
             });
           }
         }
@@ -130,11 +137,11 @@ const PracticeSettingsDashboard = () => {
 
         // Determine what the new defaults would be after this change
         const newDefaultValueToCheck = isLockStateChange ? setting.default : newDefaultValue;
-        const newDefaultLockState = isLockStateChange ? newDefaultValue : setting.lockState;
+        const newDefaultLockState = isLockStateChange ? newDefaultValue : setting.pmLockState;
 
         // Get the override's value and lock state
         const overrideValue = override.value !== undefined ? override.value : setting.default;
-        const overrideLockState = override.lockState !== undefined ? override.lockState : setting.lockState;
+        const overrideLockState = override.pmLockState !== undefined ? override.pmLockState : setting.pmLockState;
 
         // Check if BOTH value and lock state match the new defaults using helper
         const valueMatches = valuesAreEqual(overrideValue, newDefaultValueToCheck);
@@ -146,7 +153,7 @@ const PracticeSettingsDashboard = () => {
             userId,
             userName: user.name,
             value: overrideValue,
-            lockState: overrideLockState
+            pmLockState: overrideLockState
           });
         }
       }
@@ -217,11 +224,11 @@ Which is the same as the practice-wide default. An override must differ from the
 
     // Determine the effective values for this potential override
     const effectiveValue = newValue !== undefined ? newValue : (currentOverride?.value !== undefined ? currentOverride.value : setting.default);
-    const effectiveLockState = newLockState !== undefined ? newLockState : (currentOverride?.lockState !== undefined ? currentOverride.lockState : setting.lockState);
+    const effectiveLockState = newLockState !== undefined ? newLockState : (currentOverride?.pmLockState !== undefined ? currentOverride.pmLockState : setting.pmLockState);
 
     // Check if BOTH value and lock state match the defaults
     const valueMatches = valuesAreEqual(effectiveValue, setting.default);
-    const lockStateMatches = effectiveLockState === setting.lockState;
+    const lockStateMatches = effectiveLockState === setting.pmLockState;
 
     // For service-settings-combined, also check defaultService
     if (setting.type === 'service-settings-combined') {
@@ -302,7 +309,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'dropdown',
           options: ['He', 'She', 'They'],
           default: 'They',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: ''
         },
         {
@@ -311,7 +319,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'dropdown',
           options: ['As Entered', 'Infer from Audio', '"The Patient"'],
           default: 'As Entered',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'As Entered': 'AI will use the entered patient name',
             'Infer from Audio': 'AI will infer the patient name from the audio',
@@ -324,7 +333,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'dropdown',
           options: ['First Visit', 'Follow up'],
           default: 'Follow up',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: ''
         },
         {
@@ -333,7 +343,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'dropdown',
           options: ['Section View', 'Full Note View'],
           default: 'Full Note View',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'Section View': 'By default, notes will open in Section View, each section in its own text box',
             'Full Note View': 'By default, notes will open in Full Note View, everything in a single text box'
@@ -345,7 +356,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'False',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'True': 'A new section "Verbatim Dictation" will be inserted in the note',
             'False': 'Enable to insert a new section "Verbatim Dictation" to capture all dictation'
@@ -357,7 +369,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'True',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'True': '',
             'False': 'Enable to hide empty sections in your notes'
@@ -380,7 +393,8 @@ Which is the same as the practice-wide default. An override must differ from the
             'Pacific (America/Los Angeles)'
           ],
           default: 'Eastern (America/New York)',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: '',
           required: true
         },
@@ -390,7 +404,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'False',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'True': 'You will receive an OTP on email for every login in addition to your access code',
             'False': 'Enable to receive an OTP on email for every login in addition to your access code'
@@ -402,7 +417,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'False',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'True': '',
             'False': 'Enable only if your email complies with Privacy and Data Protection laws'
@@ -415,7 +431,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'False',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: '',
           dependency: 22
         },
@@ -425,7 +442,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'False',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'True': 'Recording consent disclaimer will play every time a new consult is started',
             'False': 'Enable to play a recording consent disclaimer before every consult'
@@ -443,7 +461,8 @@ Which is the same as the practice-wide default. An override must differ from the
             'Never'
           ],
           default: '1 month',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: ''
         }
       ]
@@ -459,7 +478,8 @@ Which is the same as the practice-wide default. An override must differ from the
           options: ['Outpatient', 'Inpatient', 'Emergency Services', 'Home Services', 'Nursing Facilities'],
           default: ['Outpatient'], // enabled services
           defaultService: 'Outpatient', // default service
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Configure which service settings are available and set the default.'
         },
         {
@@ -468,7 +488,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['True', 'False'],
           default: 'False',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtexts: {
             'True': '',
             'False': 'Enable to see Preventive Visit (eg. Annual check up) as a consult option for E/M codes'
@@ -486,7 +507,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'range-selector',
           options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
           default: '30 days',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
         },
         {
@@ -495,7 +517,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'order-list',
           options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
           default: ['Today', 'Future', 'Past'],
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
         },
         {
@@ -509,7 +532,8 @@ Which is the same as the practice-wide default. An override must differ from the
             '5:00 PM'
           ],
           default: [],
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
         },
         {
@@ -518,7 +542,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['On', 'Off'],
           default: 'On',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Automatically create consultation cards for appointments'
         },
         {
@@ -527,7 +552,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['Yes', 'No'],
           default: 'Off',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Allow pushing updated notes to EHR more than once'
         },
         {
@@ -536,7 +562,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['On', 'Off'],
           default: 'Off',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Automatically push completed notes to EHR system'
         }
       ]
@@ -551,7 +578,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'range-selector',
           options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
           default: '30 days',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
         },
         {
@@ -560,7 +588,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'order-list',
           options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
           default: ['Today', 'Future', 'Past'],
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
         },
         {
@@ -574,7 +603,8 @@ Which is the same as the practice-wide default. An override must differ from the
             '5:00 PM'
           ],
           default: [],
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
         },
         {
@@ -583,7 +613,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['On', 'Off'],
           default: 'On',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Automatically create consultation cards for appointments'
         },
         {
@@ -592,7 +623,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['Yes', 'No'],
           default: 'Off',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Allow pushing updated notes to EHR more than once'
         },
         {
@@ -601,7 +633,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'toggle',
           options: ['On', 'Off'],
           default: 'Off',
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Automatically push completed notes to EHR system'
         },
         {
@@ -621,7 +654,8 @@ Which is the same as the practice-wide default. An override must differ from the
             'Imaging Studies'
           ],
           default: ['Lab Reports', 'Discharge Summary', 'Radiology Reports'],
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Select which document types should be automatically pulled from the EHR'
         }
       ]
@@ -636,7 +670,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'google-signin',
           options: [],
           default: false,
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'This option is only visible to users who have signed up for "Google Calendar" as EHR.'
         },
         {
@@ -645,7 +680,8 @@ Which is the same as the practice-wide default. An override must differ from the
           type: 'zoom-check',
           options: [],
           default: false,
-          lockState: 'unlocked',
+          opsLockState: 'unlocked', // Ops controls PM access
+          pmLockState: 'unlocked',  // PM controls doctor access
           subtext: 'Connect Marvix app via Zoom marketplace. Consults via Zoom are not linked to an appointment - new consult is created.'
         }
       ]
@@ -679,7 +715,7 @@ Which is the same as the practice-wide default. An override must differ from the
   const [moduleSettings, setModuleSettings] = useState(settingsModules);
 
   const updateSettingState = (moduleId, settingId, property, value) => {
-    const isLockStateChange = property === 'lockState';
+    const isLockStateChange = property === 'pmLockState';
     const isDefaultValueChange = property === 'default';
 
     // If changing the default value or lock state, check for redundant overrides
@@ -701,7 +737,7 @@ Which is the same as the practice-wide default. An override must differ from the
             settingId,
             settingName: setting.name,
             settingType: setting.type,
-            oldDefault: isLockStateChange ? setting.lockState : setting.default,
+            oldDefault: isLockStateChange ? setting.pmLockState : setting.default,
             newDefault: value,
             redundantOverrides,
             property,
@@ -1073,7 +1109,7 @@ Which is the same as the practice-wide default. An override must differ from the
             <button
               onClick={() => {
                 if (pendingSettingChange) {
-                  const propertyToUpdate = pendingSettingChange.isLockStateChange ? 'lockState' : 'value';
+                  const propertyToUpdate = pendingSettingChange.isLockStateChange ? 'pmLockState' : 'value';
                   setUserSetting(
                     pendingSettingChange.userId,
                     pendingSettingChange.moduleId,
@@ -1197,9 +1233,9 @@ Which is the same as the practice-wide default. An override must differ from the
                             Value: {Array.isArray(override.value) ? override.value.join(', ') : override.value}
                           </p>
                           <p className="text-xs text-gray-600">
-                            Lock: {override.lockState === 'unlocked'
+                            Lock: {override.pmLockState === 'unlocked'
                               ? 'Unlocked'
-                              : override.lockState === 'locked-visible'
+                              : override.pmLockState === 'locked-visible'
                                 ? 'Locked (Visible)'
                                 : 'Locked (Hidden)'}
                           </p>
@@ -1384,7 +1420,7 @@ Which is the same as the practice-wide default. An override must differ from the
       }
 
       setUserSetting(selectedUserId, moduleId, settingId, 'value', valueToSet);
-      setUserSetting(selectedUserId, moduleId, settingId, 'lockState', overrideLockState);
+      setUserSetting(selectedUserId, moduleId, settingId, 'pmLockState', overrideLockState);
 
       // For service-settings-combined, also save the default service
       if (settingType === 'service-settings-combined' && overrideDefaultService) {
@@ -2567,7 +2603,7 @@ Which is the same as the practice-wide default. An override must differ from the
     // Get user-specific setting if it exists
     const userSetting = userId ? getUserSetting(userId, moduleId, setting.id) : null;
     const hasUserOverride = userSetting && userSetting.value !== undefined;
-    const userLockState = userSetting?.lockState || setting.lockState;
+    const userLockState = userSetting?.pmLockState || setting.pmLockState;
     const effectiveValue = hasUserOverride ? userSetting.value : setting.default;
     
     const getDisplaySubtext = () => {
@@ -2580,7 +2616,7 @@ Which is the same as the practice-wide default. An override must differ from the
     const renderFormControl = (isUserOverride = false, targetUserId = null) => {
       const value = isUserOverride ? effectiveValue : setting.default;
       // Check if default setting is locked-hidden (disable default controls, but not overrides)
-      const isDefaultLockedHidden = !isUserOverride && setting.lockState === 'locked-hidden';
+      const isDefaultLockedHidden = !isUserOverride && setting.pmLockState === 'locked-hidden';
 
       const handleChange = (newValue) => {
         if (isDefaultLockedHidden) return; // Prevent changes to locked-hidden defaults
@@ -2591,7 +2627,7 @@ Which is the same as the practice-wide default. An override must differ from the
 
           if (wouldMatchDefault) {
             // Cannot create an override that matches the default set
-            const currentLockState = getUserSetting(targetUserId, moduleId, setting.id)?.lockState || setting.lockState;
+            const currentLockState = getUserSetting(targetUserId, moduleId, setting.id)?.pmLockState || setting.pmLockState;
             alert(getMatchingOverrideAlertMessage(newValue, currentLockState));
             return;
           }
@@ -2613,10 +2649,10 @@ Which is the same as the practice-wide default. An override must differ from the
             setShowOverrideConfirmModal(true);
           } else {
             // Value matches default - check if we should remove the override entirely
-            if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.lockState !== undefined)) {
+            if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.pmLockState !== undefined)) {
               // User had an override, now setting value back to default
               // If lock state also matches default, remove entire override
-              const lockStateMatchesDefault = (currentUserSetting.lockState === undefined || currentUserSetting.lockState === setting.lockState);
+              const lockStateMatchesDefault = (currentUserSetting.pmLockState === undefined || currentUserSetting.pmLockState === setting.pmLockState);
               if (lockStateMatchesDefault) {
                 // Both match, remove entire override
                 removeUserSetting(targetUserId, moduleId, setting.id);
@@ -3170,12 +3206,12 @@ Which is the same as the practice-wide default. An override must differ from the
             <div className="flex items-center gap-3 mb-2">
               <h3 className="text-lg font-semibold text-gray-900">{setting.name}</h3>
               {setting.required && <span className="text-red-500 text-sm font-medium">*</span>}
-              {(showUserOverride ? userLockState : setting.lockState) === 'locked-visible' && (
+              {(showUserOverride ? userLockState : setting.pmLockState) === 'locked-visible' && (
                 <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
                   🔒 Locked by Practice
                 </span>
               )}
-              {(showUserOverride ? userLockState : setting.lockState) === 'locked-hidden' && (
+              {(showUserOverride ? userLockState : setting.pmLockState) === 'locked-hidden' && (
                 <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
                   👁️‍🗨️ Hidden
                 </span>
@@ -3188,12 +3224,14 @@ Which is the same as the practice-wide default. An override must differ from the
             </div>
           </div>
 
-          {/* Show lock controls based on view */}
+          {/* Show lock controls based on view and user role */}
           {(currentView === 'settings' || showUserOverride) && (
             <div className="flex items-center gap-2 ml-6">
-              <label className="text-xs font-medium text-gray-600 mr-2">Lock:</label>
+              <label className="text-xs font-medium text-gray-600 mr-2">
+                {isMasterUser() ? 'Ops Lock:' : 'PM Lock:'}
+              </label>
               <select
-                value={showUserOverride ? userLockState : setting.lockState}
+                value={showUserOverride ? userLockState : (isMasterUser() ? setting.opsLockState : setting.pmLockState)}
                 onChange={(e) => {
                   if (showUserOverride && userId) {
                     const newLockState = e.target.value;
@@ -3210,7 +3248,7 @@ Which is the same as the practice-wide default. An override must differ from the
 
                     // Check if this is a new override or if the lock state is different from practice default
                     const currentUserSetting = getUserSetting(userId, moduleId, setting.id);
-                    const isDifferentFromDefault = newLockState !== setting.lockState;
+                    const isDifferentFromDefault = newLockState !== setting.pmLockState;
 
                     if (isDifferentFromDefault) {
                       // Lock state differs from default, show confirmation modal
@@ -3220,13 +3258,13 @@ Which is the same as the practice-wide default. An override must differ from the
                         settingId: setting.id,
                         settingName: setting.name,
                         newValue: newLockState,
-                        defaultValue: setting.lockState,
+                        defaultValue: setting.pmLockState,
                         isLockStateChange: true
                       });
                       setShowOverrideConfirmModal(true);
                     } else {
                       // Lock state matches default - check if we should remove the override entirely
-                      if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.lockState !== undefined)) {
+                      if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.pmLockState !== undefined)) {
                         // User had an override, now setting lock state back to default
                         // If value also matches default, remove entire override
                         const currentValue = currentUserSetting.value !== undefined ? currentUserSetting.value : setting.default;
@@ -3237,13 +3275,15 @@ Which is the same as the practice-wide default. An override must differ from the
                           removeUserSetting(userId, moduleId, setting.id);
                         } else {
                           // Value differs, keep override but update lock state
-                          setUserSetting(userId, moduleId, setting.id, 'lockState', newLockState);
+                          setUserSetting(userId, moduleId, setting.id, 'pmLockState', newLockState);
                         }
                       }
                       // If no override exists and lock state = default, do nothing (stay at default)
                     }
                   } else {
-                    updateSettingState(moduleId, setting.id, 'lockState', e.target.value);
+                    // Master user updates opsLockState, PM user updates pmLockState
+                    const lockStateProperty = isMasterUser() ? 'opsLockState' : 'pmLockState';
+                    updateSettingState(moduleId, setting.id, lockStateProperty, e.target.value);
                   }
                 }}
                 className="px-3 py-1 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500"
@@ -3327,8 +3367,8 @@ Which is the same as the practice-wide default. An override must differ from the
           </div>
         )}
 
-        {/* User Overrides Section - Only show in default settings view (not user-specific view) */}
-        {!showUserOverride && (moduleId === 'note-settings' || moduleId === 'controls' || moduleId === 'ehr-settings-amd' || moduleId === 'ehr-settings-athena' || moduleId === 'em-settings') && (
+        {/* User Overrides Section - Only show in default settings view (not user-specific view) and not for master user */}
+        {!isMasterUser() && !showUserOverride && (moduleId === 'note-settings' || moduleId === 'controls' || moduleId === 'ehr-settings-amd' || moduleId === 'ehr-settings-athena' || moduleId === 'em-settings') && (
           <div className="mt-6 pt-6 border-t border-gray-200">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -3374,8 +3414,8 @@ Which is the same as the practice-wide default. An override must differ from the
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <p className="text-sm font-medium text-gray-900">{override.userName}</p>
-                            <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getLockStateColor(override.lockState)}`}>
-                              {getLockStateLabel(override.lockState)}
+                            <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getLockStateColor(override.pmLockState)}`}>
+                              {getLockStateLabel(override.pmLockState)}
                             </span>
                           </div>
                           <p className="text-xs text-gray-600">
@@ -4298,13 +4338,33 @@ Which is the same as the practice-wide default. An override must differ from the
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="bg-white border-b border-gray-200 px-8 py-6 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-100 rounded-lg">
-            <Shield className="w-6 h-6 text-blue-600" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <Shield className="w-6 h-6 text-blue-600" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900">Practice Management Dashboard</h1>
+              <p className="text-sm text-gray-600">Configure settings and manage user access</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Practice Management Dashboard</h1>
-            <p className="text-sm text-gray-600">Configure settings and manage user access</p>
+
+          {/* User Role Switcher */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-gray-700">Logged in as:</label>
+            <select
+              value={currentUserEmail}
+              onChange={(e) => setCurrentUserEmail(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="pm@practice.com">PM (Practice Manager)</option>
+              <option value="ops@marvix.com">Ops (Master User)</option>
+            </select>
+            {isMasterUser() && (
+              <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
+                MASTER
+              </span>
+            )}
           </div>
         </div>
       </header>
