@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/practice-settings-dashboard/static/css/main.e6c13ad2.css",
+    "main.js": "/practice-settings-dashboard/static/js/main.1676be2a.js",
+    "index.html": "/practice-settings-dashboard/index.html",
+    "main.e6c13ad2.css.map": "/practice-settings-dashboard/static/css/main.e6c13ad2.css.map",
+    "main.1676be2a.js.map": "/practice-settings-dashboard/static/js/main.1676be2a.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.e6c13ad2.css",
+    "static/js/main.1676be2a.js"
+  ]
+}
