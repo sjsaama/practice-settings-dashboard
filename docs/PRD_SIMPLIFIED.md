@@ -36,7 +36,6 @@ No separate Ops dashboard - just a master user email that can edit defaults and 
 
 **Cannot Access:**
 - ❌ User Overrides section
-- ❌ User-specific settings
 
 **Purpose:**
 - Set organization-wide defaults

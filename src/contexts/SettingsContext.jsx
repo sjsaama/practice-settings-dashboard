@@ -11,10 +11,16 @@
  * @module SettingsContext
  */
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { MASTER_USER_EMAIL } from '../constants/userRoles';
 import { settingsModules as initialSettingsModules } from '../data/settingsData';
 import { initialUsers } from '../data/initialData';
+import {
+  setMasterUserActive,
+  clearMasterUserSession,
+  startHeartbeat,
+  stopHeartbeat
+} from '../utils/masterUserSession';
 
 /**
  * Settings Context
@@ -43,6 +49,41 @@ export const SettingsProvider = ({ children }) => {
    * @returns {boolean} True if current user is master user
    */
   const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
+
+  // ==================== MASTER USER SESSION MANAGEMENT ====================
+
+  /**
+   * Manage master user session when user changes
+   * - Set session active when master user logs in
+   * - Clear session when master user logs out
+   * - Start heartbeat to keep session alive
+   */
+  useEffect(() => {
+    let heartbeatInterval;
+
+    if (isMasterUser()) {
+      // Master user logged in - activate exclusive session
+      setMasterUserActive(currentUserEmail);
+      heartbeatInterval = startHeartbeat();
+
+      console.log('[MasterUser] Session activated:', currentUserEmail);
+    } else {
+      // PM user or master user logged out - clear session
+      clearMasterUserSession();
+
+      console.log('[MasterUser] Session cleared');
+    }
+
+    // Cleanup on unmount or user change
+    return () => {
+      if (heartbeatInterval) {
+        stopHeartbeat(heartbeatInterval);
+      }
+      if (isMasterUser()) {
+        clearMasterUserSession();
+      }
+    };
+  }, [currentUserEmail]);
 
   // ==================== SETTINGS STATE ====================
 

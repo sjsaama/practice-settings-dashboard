@@ -1,5 +1,41 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import React, { useState, useEffect } from 'react';
 import { Settings, Users, ChevronRight, Search, Shield, X, RotateCcw } from 'lucide-react';
+import BlockedAccessScreen from './components/layout/BlockedAccessScreen';
+import {
+  canLoginAsMasterUser,
+  canPMAccess,
+  onMasterUserSessionChange
+} from './utils/masterUserSession';
+
+// Helper function to generate time options based on timezone
+const getTimeOptionsForTimezone = (timezone) => {
+  // Timezone offset from Eastern (base is Eastern Time)
+  const timezoneOffsets = {
+    'Eastern (America/New York)': 0,
+    'Central (America/Chicago)': -1,
+    'Mountain (America/Denver)': -2,
+    'Pacific (America/Los Angeles)': -3
+  };
+
+  const offset = timezoneOffsets[timezone] || 0;
+  const baseHours = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17];
+
+  return baseHours.map(hour => {
+    let adjustedHour = hour + offset;
+
+    // Handle negative hours (wrap to previous day, but keep in 24h range)
+    if (adjustedHour < 0) adjustedHour += 24;
+    if (adjustedHour >= 24) adjustedHour -= 24;
+
+    const hourPart = Math.floor(adjustedHour);
+    const minutePart = (adjustedHour % 1) === 0.5 ? '30' : '00';
+    const period = hourPart >= 12 ? 'PM' : 'AM';
+    const displayHour = hourPart === 0 ? 12 : hourPart > 12 ? hourPart - 12 : hourPart;
+
+    return `${displayHour}:${minutePart} ${period}`;
+  });
+};
 
 const PracticeSettingsDashboard = () => {
   // Master User / Role Management
@@ -9,6 +45,14 @@ const PracticeSettingsDashboard = () => {
   // Helper to check if current user is master user
   const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
 
+  // ==================== ACCESS CONTROL ====================
+
+  // Check if current user is blocked
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState('');
+  const [activeUser, setActiveUser] = useState('');
+
+  // ==================== ALL STATE DECLARATIONS (MUST BE BEFORE ANY CONDITIONAL RETURNS) ====================
   const [currentView, setCurrentView] = useState('settings');
   const [selectedModule, setSelectedModule] = useState('note-settings');
   const [searchTerm, setSearchTerm] = useState('');
@@ -34,7 +78,7 @@ const PracticeSettingsDashboard = () => {
   const [deletedConsults, setDeletedConsults] = useState([]);
   const [selectedRetrieveDoctor, setSelectedRetrieveDoctor] = useState('');
   const [searchPatientName, setSearchPatientName] = useState('');
-  const [searchConsultId, setSearchConsultId] = useState('');
+  const [selectedConsults, setSelectedConsults] = useState([]);
   const [hipaaAttestationChecked, setHipaaAttestationChecked] = useState(false);
   const [showHipaaEmailConfirm, setShowHipaaEmailConfirm] = useState(false);
   const [hipaaAttestationUser, setHipaaAttestationUser] = useState(null);
@@ -55,13 +99,512 @@ const PracticeSettingsDashboard = () => {
     specialty: '',
     email: ''
   });
-
-  // Override cleanup detection states
   const [showOverrideCleanupModal, setShowOverrideCleanupModal] = useState(false);
   const [overrideCleanupData, setOverrideCleanupData] = useState(null);
-
-  // User-specific settings overrides - stores custom settings per user per setting
   const [userSettingsOverrides, setUserSettingsOverrides] = useState({});
+  const [linkedAccounts, setLinkedAccounts] = useState([
+    {
+      id: 'lisa_parker',
+      name: 'Lisa Parker, RN',
+      role: 'Cardiology Nurse',
+      email: 'lisa.parker@clinic.com',
+      permissions: {
+        createConsults: true,
+        canGenerateNotes: false,
+        editGeneratedNotes: false,
+        pushToEHR: false
+      }
+    },
+    {
+      id: 'jennifer_walsh',
+      name: 'Jennifer Walsh',
+      role: 'Medical Assistant',
+      email: 'jennifer.walsh@clinic.com',
+      permissions: {
+        createConsults: true,
+        canGenerateNotes: true,
+        editGeneratedNotes: true,
+        pushToEHR: false
+      }
+    }
+  ]);
+  const [allUsers, setAllUsers] = useState([
+    { id: 1, name: 'Dr. Sarah Johnson', type: 'primary', specialty: 'Cardiology', email: 'sarah.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
+    { id: 2, name: 'Dr. Michael Chen', type: 'primary', specialty: 'Neurology', email: 'michael.chen@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
+    { id: 3, name: 'Dr. Emily Rodriguez', type: 'primary', specialty: 'Pediatrics', email: 'emily.rodriguez@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
+    { id: 4, name: 'Dr. James Wilson', type: 'primary', specialty: 'Orthopedics', email: 'james.wilson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
+    { id: 5, name: 'Dr. Lisa Thompson', type: 'primary', specialty: 'Dermatology', email: 'lisa.thompson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
+    { id: 'sec1', name: 'Lisa Parker', type: 'secondary', role: 'Nurse', email: 'lisa.parker@clinic.com', permissions: { createConsults: true, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } },
+    { id: 'sec2', name: 'Alex Johnson', type: 'secondary', role: 'Lab Technician', email: 'alex.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } }
+  ]);
+  const [showAddSecondaryAccountModal, setShowAddSecondaryAccountModal] = useState(false);
+  const [newSecondaryAccount, setNewSecondaryAccount] = useState({
+    name: '',
+    role: '',
+    email: '',
+    permissions: {
+      createConsults: true,
+      canGenerateNotes: false,
+      editGeneratedNotes: false,
+      pushToEHR: false
+    }
+  });
+
+  // Initialize moduleSettings with lazy initializer
+  // settingsModules is defined later in the component, so we use a function to defer evaluation
+  const [moduleSettings, setModuleSettings] = useState(() => {
+    // Settings data structure - Complete with all settings
+    const settingsModules = {
+      'note-settings': {
+        name: 'Note Settings',
+        subtitle: 'Settings that affect your notes and other documents',
+        settings: [
+          {
+            id: 1,
+            name: 'Default Patient Pronoun',
+            type: 'dropdown',
+            options: ['He', 'She', 'They'],
+            default: 'They',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: ''
+          },
+          {
+            id: 2,
+            name: 'Patient Name',
+            type: 'dropdown',
+            options: ['As Entered', 'Infer from Audio', '"The Patient"'],
+            default: 'As Entered',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'As Entered': 'AI will use the entered patient name',
+              'Infer from Audio': 'AI will infer the patient name from the audio',
+              '"The Patient"': 'AI will refer to the patient as "The patient"'
+            }
+          },
+          {
+            id: 3,
+            name: 'Default Visit Type',
+            type: 'dropdown',
+            options: ['First Visit', 'Follow up'],
+            default: 'Follow up',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: ''
+          },
+          {
+            id: 4,
+            name: 'Default Note View',
+            type: 'dropdown',
+            options: ['Section View', 'Full Note View'],
+            default: 'Full Note View',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'Section View': 'By default, notes will open in Section View, each section in its own text box',
+              'Full Note View': 'By default, notes will open in Full Note View, everything in a single text box'
+            }
+          },
+          {
+            id: 5,
+            name: 'Capture Dictation Separately',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'False',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'True': 'A new section "Verbatim Dictation" will be inserted in the note',
+              'False': 'Enable to insert a new section "Verbatim Dictation" to capture all dictation'
+            }
+          },
+          {
+            id: 6,
+            name: 'Skip empty sections in Note',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'True',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'True': '',
+              'False': 'Enable to hide empty sections in your notes'
+            }
+          }
+        ]
+      },
+      'controls': {
+        name: 'Controls',
+        subtitle: 'Settings that affect app behaviour',
+        settings: [
+          {
+            id: 20,
+            name: 'Timezone',
+            type: 'dropdown',
+            options: [
+              'Eastern (America/New York)',
+              'Central (America/Chicago)',
+              'Mountain (America/Denver)',
+              'Pacific (America/Los Angeles)'
+            ],
+            default: 'Eastern (America/New York)',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: '',
+            required: true
+          },
+          {
+            id: 21,
+            name: '2-factor Authentication',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'False',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'True': 'You will receive an OTP on email for every login in addition to your access code',
+              'False': 'Enable to receive an OTP on email for every login in addition to your access code'
+            }
+          },
+          {
+            id: 22,
+            name: 'Send Note on Email',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'False',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'True': '',
+              'False': 'Enable only if your email complies with Privacy and Data Protection laws'
+            },
+            requiresAttestation: true
+          },
+          {
+            id: 23,
+            name: 'Send Transcript in Email',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'False',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: '',
+            dependency: 22
+          },
+          {
+            id: 24,
+            name: 'Play Recording Consent Disclaimer',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'False',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'True': 'Recording consent disclaimer will play every time a new consult is started',
+              'False': 'Enable to play a recording consent disclaimer before every consult'
+            }
+          },
+          {
+            id: 25,
+            name: 'Delete Consults',
+            type: 'dropdown',
+            options: [
+              '1 day', '2 days', '3 days', '4 days', '5 days', '6 days',
+              '1 week', '2 weeks', '3 weeks',
+              '1 month', '2 months', '3 months', '4 months',
+              'Custom',
+              'Never'
+            ],
+            default: '1 month',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: ''
+          }
+        ]
+      },
+      'em-settings': {
+        name: 'E/M Settings',
+        subtitle: 'Settings that affect E/M codes',
+        settings: [
+          {
+            id: 41,
+            name: 'Service Settings',
+            type: 'service-settings-combined',
+            options: ['Outpatient', 'Inpatient', 'Emergency Services', 'Home Services', 'Nursing Facilities'],
+            default: ['Outpatient'],
+            defaultService: 'Outpatient',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Configure which service settings are available and set the default.'
+          },
+          {
+            id: 43,
+            name: 'Enable Preventive Medicine Service',
+            type: 'toggle',
+            options: ['True', 'False'],
+            default: 'False',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtexts: {
+              'True': '',
+              'False': 'Enable to see Preventive Visit (eg. Annual check up) as a consult option for E/M codes'
+            }
+          }
+        ]
+      },
+      'ehr-settings-amd': {
+        name: 'EHR Settings - AMD',
+        subtitle: 'Settings that control AMD EHR integration and synchronization',
+        settings: [
+          {
+            id: 71,
+            name: 'Appointments Range',
+            type: 'range-selector',
+            options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
+            default: '30 days',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
+          },
+          {
+            id: 72,
+            name: 'Appointments Order',
+            type: 'order-list',
+            options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
+            default: ['Today', 'Future', 'Past'],
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
+          },
+          {
+            id: 73,
+            name: 'Daily appointment sync time',
+            type: 'time-multiselect',
+            options: [
+              '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+              '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+              '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+              '5:00 PM'
+            ],
+            default: [],
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
+          },
+          {
+            id: 75,
+            name: 'Auto-create Consult Cards',
+            type: 'toggle',
+            options: ['On', 'Off'],
+            default: 'On',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Automatically create consultation cards for appointments'
+          },
+          {
+            id: 76,
+            name: 'Allow repeat note push',
+            type: 'toggle',
+            options: ['Yes', 'No'],
+            default: 'Off',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Allow pushing updated notes to EHR more than once'
+          },
+          {
+            id: 77,
+            name: 'Push to EHR automatically',
+            type: 'toggle',
+            options: ['On', 'Off'],
+            default: 'Off',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Automatically push completed notes to EHR system'
+          }
+        ]
+      },
+      'ehr-settings-athena': {
+        name: 'EHR Settings - Athena',
+        subtitle: 'Settings that control Athena EHR integration and synchronization',
+        settings: [
+          {
+            id: 81,
+            name: 'Appointments Range',
+            type: 'range-selector',
+            options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
+            default: '30 days',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
+          },
+          {
+            id: 82,
+            name: 'Appointments Order',
+            type: 'order-list',
+            options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
+            default: ['Today', 'Future', 'Past'],
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
+          },
+          {
+            id: 83,
+            name: 'Daily appointment sync time',
+            type: 'time-multiselect',
+            options: [
+              '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+              '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+              '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+              '5:00 PM'
+            ],
+            default: [],
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
+          },
+          {
+            id: 85,
+            name: 'Auto-create Consult Cards',
+            type: 'toggle',
+            options: ['On', 'Off'],
+            default: 'On',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Automatically create consultation cards for appointments'
+          },
+          {
+            id: 86,
+            name: 'Allow repeat note push',
+            type: 'toggle',
+            options: ['Yes', 'No'],
+            default: 'Off',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Allow pushing updated notes to EHR more than once'
+          },
+          {
+            id: 87,
+            name: 'Push to EHR automatically',
+            type: 'toggle',
+            options: ['On', 'Off'],
+            default: 'Off',
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Automatically push completed notes to EHR system'
+          },
+          {
+            id: 88,
+            name: 'Document Types to Pull From EHR',
+            type: 'multiselect',
+            options: [
+              'Lab Reports',
+              'Discharge Summary',
+              'Radiology Reports',
+              'Pathology Reports',
+              'Consultation Notes',
+              'Operative Reports',
+              'Progress Notes',
+              'Medication Lists',
+              'Immunization Records',
+              'Imaging Studies'
+            ],
+            default: ['Lab Reports', 'Discharge Summary', 'Radiology Reports'],
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Select which document types should be automatically pulled from the EHR'
+          }
+        ]
+      },
+      'teleconsult-settings': {
+        name: 'Teleconsult Settings',
+        subtitle: 'Configure your teleconsult integrations',
+        settings: [
+          {
+            id: 71,
+            name: 'Google Calendar',
+            type: 'google-signin',
+            options: [],
+            default: false,
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'This option is only visible to users who have signed up for "Google Calendar" as EHR.'
+          },
+          {
+            id: 72,
+            name: 'Zoom',
+            type: 'zoom-check',
+            options: [],
+            default: false,
+            opsLockState: 'unlocked',
+            pmLockState: 'unlocked',
+            subtext: 'Connect Marvix app via Zoom marketplace. Consults via Zoom are not linked to an appointment - new consult is created.'
+          }
+        ]
+      }
+    };
+    return settingsModules;
+  });
+
+  // Validate access on mount and when user changes
+  useEffect(() => {
+    const checkAccess = () => {
+      if (isMasterUser()) {
+        // Check if another master user is active
+        const { canLogin, reason, activeUser: activeMasterUser } = canLoginAsMasterUser(currentUserEmail);
+
+        if (!canLogin) {
+          setIsBlocked(true);
+          setBlockReason(reason);
+          setActiveUser(activeMasterUser);
+          return;
+        }
+      } else {
+        // Check if master user is active (blocks PM)
+        const { canAccess, reason, activeUser: activeMasterUser } = canPMAccess();
+
+        if (!canAccess) {
+          setIsBlocked(true);
+          setBlockReason(reason);
+          setActiveUser(activeMasterUser);
+          return;
+        }
+      }
+
+      // Access granted
+      setIsBlocked(false);
+      setBlockReason('');
+      setActiveUser('');
+    };
+
+    // Check on mount and user change
+    checkAccess();
+
+    // Listen for session changes (cross-tab communication)
+    const cleanup = onMasterUserSessionChange(() => {
+      checkAccess();
+    });
+
+    return cleanup;
+  }, [currentUserEmail]);
+
+  // Reset user view when user changes
+  useEffect(() => {
+    if (selectedUser) {
+      setSelectedUserView(selectedUser.type === 'secondary' ? 'permissions' : 'link-secondary');
+    }
+  }, [selectedUser?.id]);
+
+  // If blocked, show blocked access screen
+  if (isBlocked) {
+    return (
+      <BlockedAccessScreen
+        reason={blockReason}
+        activeUser={activeUser}
+        userType={isMasterUser() ? 'ops' : 'pm'}
+      />
+    );
+  }
 
   // Helper function to get user-specific setting or default
   const getUserSetting = (userId, moduleId, settingId) => {
@@ -240,480 +783,6 @@ Which is the same as the practice-wide default. An override must differ from the
     return valueMatches && lockStateMatches;
   };
 
-  // Linked accounts state with permissions
-  const [linkedAccounts, setLinkedAccounts] = useState([
-    {
-      id: 'lisa_parker',
-      name: 'Lisa Parker, RN',
-      role: 'Cardiology Nurse',
-      email: 'lisa.parker@clinic.com',
-      permissions: {
-        createConsults: true,
-        canGenerateNotes: false,
-        editGeneratedNotes: false,
-        pushToEHR: false
-      }
-    },
-    {
-      id: 'jennifer_walsh',
-      name: 'Jennifer Walsh',
-      role: 'Medical Assistant',
-      email: 'jennifer.walsh@clinic.com',
-      permissions: {
-        createConsults: true,
-        canGenerateNotes: true,
-        editGeneratedNotes: true,
-        pushToEHR: false
-      }
-    }
-  ]);
-
-  // Helper function to generate time options based on timezone
-  const getTimeOptionsForTimezone = (timezone) => {
-    // Timezone offset from Eastern (base is Eastern Time)
-    const timezoneOffsets = {
-      'Eastern (America/New York)': 0,
-      'Central (America/Chicago)': -1,
-      'Mountain (America/Denver)': -2,
-      'Pacific (America/Los Angeles)': -3
-    };
-
-    const offset = timezoneOffsets[timezone] || 0;
-    const baseHours = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17];
-
-    return baseHours.map(hour => {
-      let adjustedHour = hour + offset;
-
-      // Handle negative hours (wrap to previous day, but keep in 24h range)
-      if (adjustedHour < 0) adjustedHour += 24;
-      if (adjustedHour >= 24) adjustedHour -= 24;
-
-      const hourPart = Math.floor(adjustedHour);
-      const minutePart = (adjustedHour % 1) === 0.5 ? '30' : '00';
-      const period = hourPart >= 12 ? 'PM' : 'AM';
-      const displayHour = hourPart === 0 ? 12 : hourPart > 12 ? hourPart - 12 : hourPart;
-
-      return `${displayHour}:${minutePart} ${period}`;
-    });
-  };
-
-  // Settings data structure - Complete with all settings
-  const settingsModules = {
-    'note-settings': {
-      name: 'Note Settings',
-      subtitle: 'Settings that affect your notes and other documents',
-      settings: [
-        {
-          id: 1,
-          name: 'Default Patient Pronoun',
-          type: 'dropdown',
-          options: ['He', 'She', 'They'],
-          default: 'They',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: ''
-        },
-        {
-          id: 2,
-          name: 'Patient Name',
-          type: 'dropdown',
-          options: ['As Entered', 'Infer from Audio', '"The Patient"'],
-          default: 'As Entered',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'As Entered': 'AI will use the entered patient name',
-            'Infer from Audio': 'AI will infer the patient name from the audio',
-            '"The Patient"': 'AI will refer to the patient as "The patient"'
-          }
-        },
-        {
-          id: 3,
-          name: 'Default Visit Type',
-          type: 'dropdown',
-          options: ['First Visit', 'Follow up'],
-          default: 'Follow up',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: ''
-        },
-        {
-          id: 4,
-          name: 'Default Note View',
-          type: 'dropdown',
-          options: ['Section View', 'Full Note View'],
-          default: 'Full Note View',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'Section View': 'By default, notes will open in Section View, each section in its own text box',
-            'Full Note View': 'By default, notes will open in Full Note View, everything in a single text box'
-          }
-        },
-        {
-          id: 5,
-          name: 'Capture Dictation Separately',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'False',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'True': 'A new section "Verbatim Dictation" will be inserted in the note',
-            'False': 'Enable to insert a new section "Verbatim Dictation" to capture all dictation'
-          }
-        },
-        {
-          id: 6,
-          name: 'Skip empty sections in Note',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'True',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'True': '',
-            'False': 'Enable to hide empty sections in your notes'
-          }
-        }
-      ]
-    },
-    'controls': {
-      name: 'Controls',
-      subtitle: 'Settings that affect app behaviour',
-      settings: [
-        {
-          id: 20,
-          name: 'Timezone',
-          type: 'dropdown',
-          options: [
-            'Eastern (America/New York)', 
-            'Central (America/Chicago)', 
-            'Mountain (America/Denver)', 
-            'Pacific (America/Los Angeles)'
-          ],
-          default: 'Eastern (America/New York)',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: '',
-          required: true
-        },
-        {
-          id: 21,
-          name: '2-factor Authentication',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'False',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'True': 'You will receive an OTP on email for every login in addition to your access code',
-            'False': 'Enable to receive an OTP on email for every login in addition to your access code'
-          }
-        },
-        {
-          id: 22,
-          name: 'Send Note on Email',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'False',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'True': '',
-            'False': 'Enable only if your email complies with Privacy and Data Protection laws'
-          },
-          requiresAttestation: true
-        },
-        {
-          id: 23,
-          name: 'Send Transcript in Email',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'False',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: '',
-          dependency: 22
-        },
-        {
-          id: 24,
-          name: 'Play Recording Consent Disclaimer',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'False',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'True': 'Recording consent disclaimer will play every time a new consult is started',
-            'False': 'Enable to play a recording consent disclaimer before every consult'
-          }
-        },
-        {
-          id: 25,
-          name: 'Delete Consults',
-          type: 'dropdown',
-          options: [
-            '1 day', '2 days', '3 days', '4 days', '5 days', '6 days',
-            '1 week', '2 weeks', '3 weeks',
-            '1 month', '2 months', '3 months', '4 months',
-            'Custom',
-            'Never'
-          ],
-          default: '1 month',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: ''
-        }
-      ]
-    },
-    'em-settings': {
-      name: 'E/M Settings',
-      subtitle: 'Settings that affect E/M codes',
-      settings: [
-        {
-          id: 41,
-          name: 'Service Settings',
-          type: 'service-settings-combined',
-          options: ['Outpatient', 'Inpatient', 'Emergency Services', 'Home Services', 'Nursing Facilities'],
-          default: ['Outpatient'], // enabled services
-          defaultService: 'Outpatient', // default service
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Configure which service settings are available and set the default.'
-        },
-        {
-          id: 43,
-          name: 'Enable Preventive Medicine Service',
-          type: 'toggle',
-          options: ['True', 'False'],
-          default: 'False',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtexts: {
-            'True': '',
-            'False': 'Enable to see Preventive Visit (eg. Annual check up) as a consult option for E/M codes'
-          }
-        }
-      ]
-    },
-    'ehr-settings-amd': {
-      name: 'EHR Settings - AMD',
-      subtitle: 'Settings that control AMD EHR integration and synchronization',
-      settings: [
-        {
-          id: 71,
-          name: 'Appointments Range',
-          type: 'range-selector',
-          options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
-          default: '30 days',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
-        },
-        {
-          id: 72,
-          name: 'Appointments Order',
-          type: 'order-list',
-          options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
-          default: ['Today', 'Future', 'Past'],
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
-        },
-        {
-          id: 73,
-          name: 'Daily appointment sync time',
-          type: 'time-multiselect',
-          options: [
-            '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-            '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
-            '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
-            '5:00 PM'
-          ],
-          default: [],
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-        },
-        {
-          id: 75,
-          name: 'Auto-create Consult Cards',
-          type: 'toggle',
-          options: ['On', 'Off'],
-          default: 'On',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Automatically create consultation cards for appointments'
-        },
-        {
-          id: 76,
-          name: 'Allow repeat note push',
-          type: 'toggle',
-          options: ['Yes', 'No'],
-          default: 'Off',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Allow pushing updated notes to EHR more than once'
-        },
-        {
-          id: 77,
-          name: 'Push to EHR automatically',
-          type: 'toggle',
-          options: ['On', 'Off'],
-          default: 'Off',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Automatically push completed notes to EHR system'
-        }
-      ]
-    },
-    'ehr-settings-athena': {
-      name: 'EHR Settings - Athena',
-      subtitle: 'Settings that control Athena EHR integration and synchronization',
-      settings: [
-        {
-          id: 81,
-          name: 'Appointments Range',
-          type: 'range-selector',
-          options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
-          default: '30 days',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
-        },
-        {
-          id: 82,
-          name: 'Appointments Order',
-          type: 'order-list',
-          options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
-          default: ['Today', 'Future', 'Past'],
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
-        },
-        {
-          id: 83,
-          name: 'Daily appointment sync time',
-          type: 'time-multiselect',
-          options: [
-            '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-            '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
-            '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
-            '5:00 PM'
-          ],
-          default: [],
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-        },
-        {
-          id: 85,
-          name: 'Auto-create Consult Cards',
-          type: 'toggle',
-          options: ['On', 'Off'],
-          default: 'On',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Automatically create consultation cards for appointments'
-        },
-        {
-          id: 86,
-          name: 'Allow repeat note push',
-          type: 'toggle',
-          options: ['Yes', 'No'],
-          default: 'Off',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Allow pushing updated notes to EHR more than once'
-        },
-        {
-          id: 87,
-          name: 'Push to EHR automatically',
-          type: 'toggle',
-          options: ['On', 'Off'],
-          default: 'Off',
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Automatically push completed notes to EHR system'
-        },
-        {
-          id: 88,
-          name: 'Document Types to Pull From EHR',
-          type: 'multiselect',
-          options: [
-            'Lab Reports',
-            'Discharge Summary',
-            'Radiology Reports',
-            'Pathology Reports',
-            'Consultation Notes',
-            'Operative Reports',
-            'Progress Notes',
-            'Medication Lists',
-            'Immunization Records',
-            'Imaging Studies'
-          ],
-          default: ['Lab Reports', 'Discharge Summary', 'Radiology Reports'],
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Select which document types should be automatically pulled from the EHR'
-        }
-      ]
-    },
-    'teleconsult-settings': {
-      name: 'Teleconsult Settings',
-      subtitle: 'Configure your teleconsult integrations',
-      settings: [
-        {
-          id: 71,
-          name: 'Google Calendar',
-          type: 'google-signin',
-          options: [],
-          default: false,
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'This option is only visible to users who have signed up for "Google Calendar" as EHR.'
-        },
-        {
-          id: 72,
-          name: 'Zoom',
-          type: 'zoom-check',
-          options: [],
-          default: false,
-          opsLockState: 'unlocked', // Ops controls PM access
-          pmLockState: 'unlocked',  // PM controls doctor access
-          subtext: 'Connect Marvix app via Zoom marketplace. Consults via Zoom are not linked to an appointment - new consult is created.'
-        }
-      ]
-    }
-  };
-
-  // All users data - both primary and secondary accounts
-  const [allUsers, setAllUsers] = useState([
-    { id: 1, name: 'Dr. Sarah Johnson', type: 'primary', specialty: 'Cardiology', email: 'sarah.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 2, name: 'Dr. Michael Chen', type: 'primary', specialty: 'Neurology', email: 'michael.chen@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 3, name: 'Dr. Emily Rodriguez', type: 'primary', specialty: 'Pediatrics', email: 'emily.rodriguez@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 4, name: 'Dr. James Wilson', type: 'primary', specialty: 'Orthopedics', email: 'james.wilson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 5, name: 'Dr. Lisa Thompson', type: 'primary', specialty: 'Dermatology', email: 'lisa.thompson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 'sec1', name: 'Lisa Parker', type: 'secondary', role: 'Nurse', email: 'lisa.parker@clinic.com', permissions: { createConsults: true, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } },
-    { id: 'sec2', name: 'Alex Johnson', type: 'secondary', role: 'Lab Technician', email: 'alex.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } }
-  ]);
-
-  const [showAddSecondaryAccountModal, setShowAddSecondaryAccountModal] = useState(false);
-  const [newSecondaryAccount, setNewSecondaryAccount] = useState({
-    name: '',
-    role: '',
-    email: '',
-    permissions: {
-      createConsults: true,
-      canGenerateNotes: false,
-      editGeneratedNotes: false,
-      pushToEHR: false
-    }
-  });
-
-  const [moduleSettings, setModuleSettings] = useState(settingsModules);
-
   const updateSettingState = (moduleId, settingId, property, value) => {
     const isLockStateChange = property === 'pmLockState';
     const isDefaultValueChange = property === 'default';
@@ -801,13 +870,6 @@ Which is the same as the practice-wide default. An override must differ from the
     (user.specialty && user.specialty.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (user.role && user.role.toLowerCase().includes(searchTerm.toLowerCase()))
   );
-
-  // Reset user view when user changes
-  useEffect(() => {
-    if (selectedUser) {
-      setSelectedUserView(selectedUser.type === 'secondary' ? 'permissions' : 'link-secondary');
-    }
-  }, [selectedUser?.id]);
 
   // Modal Components
   const EmailAttestationModal = () => (
@@ -2806,7 +2868,9 @@ Which is the same as the practice-wide default. An override must differ from the
           // For Daily appointment sync time (id 73 or 83), get options dynamically based on timezone
           const timeOptions = (setting.id === 73 || setting.id === 83)
             ? (() => {
-                const currentTimezone = settingsModules['controls'].settings.find(s => s.id === 20)?.default || 'Eastern (America/New York)';
+                const timezoneSetting = moduleSettings['controls']?.settings.find(s => s.id === 20);
+                const timezoneUserSetting = userId ? getUserSetting(userId, 'controls', 20) : null;
+                const currentTimezone = timezoneUserSetting?.value || timezoneSetting?.default || 'Eastern (America/New York)';
                 return getTimeOptionsForTimezone(currentTimezone);
               })()
             : setting.options;
@@ -2816,7 +2880,9 @@ Which is the same as the practice-wide default. An override must differ from the
               <div className="text-sm text-gray-600 mb-2">
                 Select up to {maxSelections} sync times (selected: {selectedTimes.length}/{maxSelections})
                 {(setting.id === 73 || setting.id === 83) && (() => {
-                  const currentTimezone = settingsModules['controls'].settings.find(s => s.id === 20)?.default || 'Eastern (America/New York)';
+                  const timezoneSetting = moduleSettings['controls']?.settings.find(s => s.id === 20);
+                  const timezoneUserSetting = userId ? getUserSetting(userId, 'controls', 20) : null;
+                  const currentTimezone = timezoneUserSetting?.value || timezoneSetting?.default || 'Eastern (America/New York)';
                   const tzLabel = currentTimezone.match(/\((.*?)\)/)?.[1] || currentTimezone;
                   return <span className="ml-2 text-xs text-gray-500">({tzLabel})</span>;
                 })()}
@@ -3593,8 +3659,8 @@ Which is the same as the practice-wide default. An override must differ from the
                     setDeletedConsults([]);
                     setRetrieveStartDate('');
                     setRetrieveEndDate('');
-                    setSearchConsultId('');
                     setSearchPatientName('');
+                    setSelectedConsults([]);
                   }}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 >
@@ -3606,42 +3672,32 @@ Which is the same as the practice-wide default. An override must differ from the
               </div>
             </div>
 
-            {/* Step 2: Search Options - Only show after doctor selected */}
+            {/* Step 2: Filter Options - Only show after doctor selected */}
             {selectedRetrieveDoctor && (
               <div className="border-l-4 border-green-400 bg-green-50 p-6 rounded-lg">
-                <h4 className="text-lg font-semibold text-green-800 mb-4">Step 2: Search Consults</h4>
+                <h4 className="text-lg font-semibold text-green-800 mb-4">Step 2: Filter Deleted Consults</h4>
                 <p className="text-sm text-green-700 mb-4">
-                  Search by consult ID OR select a date range to find deleted consults.
+                  Use patient name and/or date range to filter deleted consults.
                 </p>
 
                 <div className="space-y-4">
-                  {/* Option 1: Search by Consult ID */}
+                  {/* Patient Name Filter */}
                   <div className="bg-white p-4 rounded-lg border-2 border-green-200">
-                    <h5 className="text-sm font-semibold text-gray-900 mb-3">Option A: Search by Consult ID</h5>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Consult ID
-                      </label>
-                      <input
-                        type="text"
-                        value={searchConsultId}
-                        onChange={(e) => setSearchConsultId(e.target.value)}
-                        placeholder="Enter consult ID (e.g., CONS-2025-001)..."
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                      />
-                    </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Patient Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={searchPatientName}
+                      onChange={(e) => setSearchPatientName(e.target.value)}
+                      placeholder="Enter patient name..."
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
+                    />
                   </div>
 
-                  {/* OR Separator */}
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 border-t-2 border-gray-300"></div>
-                    <span className="text-sm font-semibold text-gray-500 uppercase px-3">OR</span>
-                    <div className="flex-1 border-t-2 border-gray-300"></div>
-                  </div>
-
-                  {/* Option 2: Search by Date Range */}
+                  {/* Date Range Filter */}
                   <div className="bg-white p-4 rounded-lg border-2 border-green-200">
-                    <h5 className="text-sm font-semibold text-gray-900 mb-3">Option B: Search by Date Range</h5>
+                    <h5 className="text-sm font-semibold text-gray-900 mb-3">Date Range (Optional)</h5>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -3671,36 +3727,11 @@ Which is the same as the practice-wide default. An override must differ from the
                         />
                       </div>
                     </div>
-
-                    {/* Optional: Patient Name Filter (only for date range search) */}
-                    {(retrieveStartDate || retrieveEndDate) && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Optional: Filter by Patient Name
-                        </label>
-                        <input
-                          type="text"
-                          value={searchPatientName}
-                          onChange={(e) => setSearchPatientName(e.target.value)}
-                          placeholder="Enter patient name to narrow results..."
-                          className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                        />
-                      </div>
-                    )}
                   </div>
                 </div>
 
                 <button
                   onClick={() => {
-                    // Validate that either consult ID or date range is provided
-                    const hasConsultId = searchConsultId.trim().length > 0;
-                    const hasDateRange = retrieveStartDate && retrieveEndDate;
-
-                    if (!hasConsultId && !hasDateRange) {
-                      alert('Please enter a Consult ID OR select a date range to search');
-                      return;
-                    }
-
                     // Get selected doctor name
                     const selectedDoctor = allUsers.find(u => u.id.toString() === selectedRetrieveDoctor);
                     const doctorName = selectedDoctor?.name || '';
@@ -3750,6 +3781,28 @@ Which is the same as the practice-wide default. An override must differ from the
                         doctorName: doctorName,
                         doctorId: selectedRetrieveDoctor,
                         canRetrieve: true
+                      },
+                      {
+                        id: 'CONS-2025-005',
+                        consultId: 'CONS-2025-005',
+                        patientName: 'Michael Brown',
+                        deletedDate: '2025-11-01',
+                        consultDate: '2025-10-28',
+                        reason: 'Physical examination',
+                        doctorName: doctorName,
+                        doctorId: selectedRetrieveDoctor,
+                        canRetrieve: true
+                      },
+                      {
+                        id: 'CONS-2025-006',
+                        consultId: 'CONS-2025-006',
+                        patientName: 'Sarah Johnson',
+                        deletedDate: '2025-11-05',
+                        consultDate: '2025-11-02',
+                        reason: 'Consultation for lab results',
+                        doctorName: doctorName,
+                        doctorId: selectedRetrieveDoctor,
+                        canRetrieve: true
                       }
                     ];
 
@@ -3758,40 +3811,29 @@ Which is the same as the practice-wide default. An override must differ from the
                       // Always filter by doctor
                       if (c.doctorId !== selectedRetrieveDoctor) return false;
 
-                      // If searching by consult ID only
-                      if (hasConsultId && !hasDateRange) {
-                        return c.consultId.toLowerCase().includes(searchConsultId.toLowerCase());
-                      }
+                      // Only show retrievable consults (exclude permanently deleted ones beyond 6 months)
+                      if (!c.canRetrieve) return false;
 
-                      // If searching by date range only
-                      if (hasDateRange && !hasConsultId) {
+                      let matches = true;
+
+                      // Filter by date range if provided
+                      if (retrieveStartDate && retrieveEndDate) {
                         const deletedDate = new Date(c.deletedDate);
                         const start = new Date(retrieveStartDate);
                         const end = new Date(retrieveEndDate);
-                        const inDateRange = deletedDate >= start && deletedDate <= end;
-
-                        // Apply optional patient name filter if provided
-                        if (searchPatientName && inDateRange) {
-                          return c.patientName.toLowerCase().includes(searchPatientName.toLowerCase());
-                        }
-                        return inDateRange;
+                        matches = matches && (deletedDate >= start && deletedDate <= end);
                       }
 
-                      // If both consult ID and date range are provided, use both
-                      if (hasConsultId && hasDateRange) {
-                        const deletedDate = new Date(c.deletedDate);
-                        const start = new Date(retrieveStartDate);
-                        const end = new Date(retrieveEndDate);
-                        const matchesId = c.consultId.toLowerCase().includes(searchConsultId.toLowerCase());
-                        const inDateRange = deletedDate >= start && deletedDate <= end;
-
-                        return matchesId && inDateRange;
+                      // Filter by patient name if provided
+                      if (searchPatientName && searchPatientName.trim()) {
+                        matches = matches && c.patientName.toLowerCase().includes(searchPatientName.toLowerCase().trim());
                       }
 
-                      return true;
+                      return matches;
                     });
 
                     setDeletedConsults(filtered);
+                    setSelectedConsults([]); // Reset selection when new search is performed
                   }}
                   className="mt-4 px-6 py-3 rounded-lg font-medium transition-colors bg-green-600 text-white hover:bg-green-700"
               >
@@ -3806,29 +3848,65 @@ Which is the same as the practice-wide default. An override must differ from the
             {/* Results Section */}
             {deletedConsults.length > 0 && (
               <div className="border border-gray-200 rounded-lg p-6">
-                <h5 className="font-medium text-gray-900 mb-4">
-                  Deleted Consults ({deletedConsults.length} found)
-                </h5>
+                <div className="flex items-center justify-between mb-4">
+                  <h5 className="font-medium text-gray-900">
+                    Deleted Consults ({deletedConsults.length} found)
+                  </h5>
 
-                <div className="space-y-4">
+                  {/* Select All Checkbox */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="selectAll"
+                      checked={deletedConsults.length > 0 && deletedConsults.every(c => selectedConsults.includes(c.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          // Select all consults
+                          const allIds = deletedConsults.map(c => c.id);
+                          setSelectedConsults(allIds);
+                        } else {
+                          // Deselect all
+                          setSelectedConsults([]);
+                        }
+                      }}
+                      className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                    />
+                    <label htmlFor="selectAll" className="text-sm font-medium text-gray-700 cursor-pointer">
+                      Select All
+                    </label>
+                  </div>
+                </div>
+
+                <div className="space-y-4 mb-4">
                   {deletedConsults.map((consult) => (
                     <div
                       key={consult.id}
                       className={`border rounded-lg p-5 ${
-                        consult.canRetrieve
-                          ? 'border-gray-200 bg-white'
-                          : 'border-red-200 bg-red-50'
+                        selectedConsults.includes(consult.id)
+                          ? 'border-green-300 bg-green-50'
+                          : 'border-gray-200 bg-white'
                       }`}
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-4">
+                        {/* Checkbox */}
+                        <div className="pt-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedConsults.includes(consult.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedConsults(prev => [...prev, consult.id]);
+                              } else {
+                                setSelectedConsults(prev => prev.filter(id => id !== consult.id));
+                              }
+                            }}
+                            className="w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                          />
+                        </div>
+
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
                             <h6 className="font-semibold text-gray-900">{consult.patientName}</h6>
-                            {!consult.canRetrieve && (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                                Permanently Deleted
-                              </span>
-                            )}
                           </div>
                           <div className="space-y-1 text-sm text-gray-600">
                             <p><span className="font-medium">Consult ID:</span> {consult.consultId}</p>
@@ -3838,32 +3916,39 @@ Which is the same as the practice-wide default. An override must differ from the
                             <p><span className="font-medium">Reason:</span> {consult.reason}</p>
                           </div>
                         </div>
-
-                        <div className="ml-4">
-                          {consult.canRetrieve ? (
-                            <button
-                              onClick={() => {
-                                // In real app, this would restore the consult
-                                alert(`Retrieving consult for ${consult.patientName}`);
-                                setDeletedConsults(prev => prev.filter(c => c.id !== consult.id));
-                              }}
-                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
-                            >
-                              <div className="flex items-center gap-2">
-                                <RotateCcw className="w-4 h-4" />
-                                Retrieve
-                              </div>
-                            </button>
-                          ) : (
-                            <div className="text-xs text-red-600 text-center max-w-[120px]">
-                              Cannot retrieve (beyond 6 month limit)
-                            </div>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
+
+                {/* Retrieve Selected Button */}
+                {selectedConsults.length > 0 && (
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="text-sm text-gray-700">
+                      <span className="font-semibold">{selectedConsults.length}</span> consult{selectedConsults.length !== 1 ? 's' : ''} selected
+                    </div>
+                    <button
+                      onClick={() => {
+                        // In real app, this would restore the selected consults
+                        const selectedNames = deletedConsults
+                          .filter(c => selectedConsults.includes(c.id))
+                          .map(c => c.patientName)
+                          .join(', ');
+                        alert(`Retrieving ${selectedConsults.length} consult(s) for: ${selectedNames}`);
+
+                        // Remove retrieved consults from the list
+                        setDeletedConsults(prev => prev.filter(c => !selectedConsults.includes(c.id)));
+                        setSelectedConsults([]);
+                      }}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <RotateCcw className="w-4 h-4" />
+                        Retrieve Selected ({selectedConsults.length})
+                      </div>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
