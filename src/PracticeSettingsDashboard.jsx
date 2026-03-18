@@ -7,6 +7,8 @@ import {
   canPMAccess,
   onMasterUserSessionChange
 } from './utils/masterUserSession';
+import { canPMEditSetting, canPMSeeSetting, getOpsLockLabel } from './utils/accessPolicy';
+import { loadModuleSettingsFromStorage, MODULE_SETTINGS_STORAGE_KEY, saveModuleSettingsToStorage } from './utils/moduleSettingsStorage';
 
 // Helper function to generate time options based on timezone
 const getTimeOptionsForTimezone = (timezone) => {
@@ -90,6 +92,7 @@ const PracticeSettingsDashboard = () => {
   const [pastDays, setPastDays] = useState(1); // Days for Past appointments
   const [newUserPermissions, setNewUserPermissions] = useState({
     createConsults: true,
+    mergeAndLinkAppointments: false,
     canGenerateNotes: false,
     editGeneratedNotes: false,
     pushToEHR: false
@@ -110,6 +113,7 @@ const PracticeSettingsDashboard = () => {
       email: 'lisa.parker@clinic.com',
       permissions: {
         createConsults: true,
+        mergeAndLinkAppointments: false,
         canGenerateNotes: false,
         editGeneratedNotes: false,
         pushToEHR: false
@@ -122,6 +126,7 @@ const PracticeSettingsDashboard = () => {
       email: 'jennifer.walsh@clinic.com',
       permissions: {
         createConsults: true,
+        mergeAndLinkAppointments: false,
         canGenerateNotes: true,
         editGeneratedNotes: true,
         pushToEHR: false
@@ -134,8 +139,8 @@ const PracticeSettingsDashboard = () => {
     { id: 3, name: 'Dr. Emily Rodriguez', type: 'primary', specialty: 'Pediatrics', email: 'emily.rodriguez@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
     { id: 4, name: 'Dr. James Wilson', type: 'primary', specialty: 'Orthopedics', email: 'james.wilson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
     { id: 5, name: 'Dr. Lisa Thompson', type: 'primary', specialty: 'Dermatology', email: 'lisa.thompson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 'sec1', name: 'Lisa Parker', type: 'secondary', role: 'Nurse', email: 'lisa.parker@clinic.com', permissions: { createConsults: true, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } },
-    { id: 'sec2', name: 'Alex Johnson', type: 'secondary', role: 'Lab Technician', email: 'alex.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } }
+    { id: 'sec1', name: 'Lisa Parker', type: 'secondary', role: 'Nurse', email: 'lisa.parker@clinic.com', permissions: { createConsults: true, mergeAndLinkAppointments: false, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } },
+    { id: 'sec2', name: 'Alex Johnson', type: 'secondary', role: 'Lab Technician', email: 'alex.johnson@clinic.com', permissions: { createConsults: true, mergeAndLinkAppointments: false, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } }
   ]);
   const [showAddSecondaryAccountModal, setShowAddSecondaryAccountModal] = useState(false);
   const [newSecondaryAccount, setNewSecondaryAccount] = useState({
@@ -144,6 +149,7 @@ const PracticeSettingsDashboard = () => {
     email: '',
     permissions: {
       createConsults: true,
+      mergeAndLinkAppointments: false,
       canGenerateNotes: false,
       editGeneratedNotes: false,
       pushToEHR: false
@@ -153,6 +159,9 @@ const PracticeSettingsDashboard = () => {
   // Initialize moduleSettings with lazy initializer
   // settingsModules is defined later in the component, so we use a function to defer evaluation
   const [moduleSettings, setModuleSettings] = useState(() => {
+    const saved = loadModuleSettingsFromStorage();
+    if (saved) return saved;
+
     // Settings data structure - Complete with all settings
     const settingsModules = {
       'note-settings': {
@@ -358,26 +367,6 @@ const PracticeSettingsDashboard = () => {
         subtitle: 'Settings that control AMD EHR integration and synchronization',
         settings: [
           {
-            id: 71,
-            name: 'Appointments Range',
-            type: 'range-selector',
-            options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
-            default: '30 days',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
-          },
-          {
-            id: 72,
-            name: 'Appointments Order',
-            type: 'order-list',
-            options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
-            default: ['Today', 'Future', 'Past'],
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
-          },
-          {
             id: 73,
             name: 'Daily appointment sync time',
             type: 'time-multiselect',
@@ -391,16 +380,6 @@ const PracticeSettingsDashboard = () => {
             opsLockState: 'unlocked',
             pmLockState: 'unlocked',
             subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-          },
-          {
-            id: 75,
-            name: 'Auto-create Consult Cards',
-            type: 'toggle',
-            options: ['On', 'Off'],
-            default: 'On',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Automatically create consultation cards for appointments'
           },
           {
             id: 76,
@@ -429,26 +408,6 @@ const PracticeSettingsDashboard = () => {
         subtitle: 'Settings that control Athena EHR integration and synchronization',
         settings: [
           {
-            id: 81,
-            name: 'Appointments Range',
-            type: 'range-selector',
-            options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
-            default: '30 days',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
-          },
-          {
-            id: 82,
-            name: 'Appointments Order',
-            type: 'order-list',
-            options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
-            default: ['Today', 'Future', 'Past'],
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
-          },
-          {
             id: 83,
             name: 'Daily appointment sync time',
             type: 'time-multiselect',
@@ -462,16 +421,6 @@ const PracticeSettingsDashboard = () => {
             opsLockState: 'unlocked',
             pmLockState: 'unlocked',
             subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-          },
-          {
-            id: 85,
-            name: 'Auto-create Consult Cards',
-            type: 'toggle',
-            options: ['On', 'Off'],
-            default: 'On',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Automatically create consultation cards for appointments'
           },
           {
             id: 86,
@@ -546,6 +495,30 @@ const PracticeSettingsDashboard = () => {
     return settingsModules;
   });
 
+  // Persist module settings so Ops changes apply to PM sessions/tabs
+  useEffect(() => {
+    saveModuleSettingsToStorage(moduleSettings);
+  }, [moduleSettings]);
+
+  // Cross-tab sync: if Ops changes in another tab, update in this tab
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key !== MODULE_SETTINGS_STORAGE_KEY) return;
+      if (!event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue);
+        if (parsed && typeof parsed === 'object') {
+          setModuleSettings(parsed);
+        }
+      } catch (e) {
+        // Ignore malformed values
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   // Validate access on mount and when user changes
   useEffect(() => {
     const checkAccess = () => {
@@ -614,6 +587,12 @@ const PracticeSettingsDashboard = () => {
 
   // Helper function to set user-specific setting
   const setUserSetting = (userId, moduleId, settingId, property, value) => {
+    // Defense-in-depth: Ops can only create/edit doctor overrides when Ops has left the setting unlocked
+    if (isMasterUser()) {
+      const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
+      if (setting && setting.opsLockState !== 'unlocked') return;
+    }
+
     const key = `${userId}-${moduleId}-${settingId}`;
     setUserSettingsOverrides(prev => ({
       ...prev,
@@ -784,6 +763,22 @@ Which is the same as the practice-wide default. An override must differ from the
   };
 
   const updateSettingState = (moduleId, settingId, property, value) => {
+    // Ops inheritance enforcement (source of truth):
+    // When Ops locks a setting (locked-visible/locked-hidden), PM must not be able to:
+    // - change defaults
+    // - change pmLockState
+    // - change defaultService (service-settings-combined)
+    if (!isMasterUser()) {
+      const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
+      const opsLocked = setting && !canPMEditSetting(setting);
+      const pmAttemptingRestrictedChange =
+        property === 'default' || property === 'pmLockState' || property === 'defaultService';
+
+      if (opsLocked && pmAttemptingRestrictedChange) {
+        return;
+      }
+    }
+
     const isLockStateChange = property === 'pmLockState';
     const isDefaultValueChange = property === 'default';
 
@@ -1440,6 +1435,15 @@ Which is the same as the practice-wide default. An override must differ from the
     const availableUsers = allUsers.filter(u => !existingUserIds.includes(u.id.toString()));
 
     const handleSave = () => {
+      // Defense-in-depth: Ops can only create doctor overrides when Ops has left the setting unlocked
+      if (isMasterUser()) {
+        const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
+        if (setting && setting.opsLockState !== 'unlocked') {
+          alert('Ops overrides are only allowed when Ops Lock is set to Unlocked for this setting.');
+          return;
+        }
+      }
+
       if (!selectedUserId) {
         alert('Please select a user');
         return;
@@ -2077,6 +2081,26 @@ Which is the same as the practice-wide default. An override must differ from the
             <div className="bg-gray-50 rounded-lg p-4 space-y-4">
               <h6 className="font-medium text-gray-800 text-sm">Account Permissions</h6>
 
+              {/* Merge and Link Appointments */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-700">Merge and Link Appointments</p>
+                  <p className="text-xs text-gray-500">Can merge duplicate appointments and link consults to appointments.</p>
+                </div>
+                <div
+                  className={`relative w-12 h-7 rounded-full cursor-pointer transition-colors duration-300 ${
+                    newSecondaryAccount.permissions.mergeAndLinkAppointments ? 'bg-green-500' : 'bg-gray-300'
+                  }`}
+                  onClick={() => updateSecondaryPermission('mergeAndLinkAppointments', !newSecondaryAccount.permissions.mergeAndLinkAppointments)}
+                >
+                  <div
+                    className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
+                      newSecondaryAccount.permissions.mergeAndLinkAppointments ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </div>
+              </div>
+
               {/* Create Consults */}
               <div className="flex items-center justify-between">
                 <div>
@@ -2662,6 +2686,13 @@ Which is the same as the practice-wide default. An override must differ from the
     const isEnabled = isSettingEnabled(setting);
     const availableOptions = getAvailableOptions(setting);
 
+    // Ops inheritance: for PM default view, Ops can hide/lock settings
+    const isPMDefaultView = !isMasterUser() && !showUserOverride;
+    const isPMHiddenByOps = isPMDefaultView && !canPMSeeSetting(setting);
+    const isPMLockedByOps = isPMDefaultView && !canPMEditSetting(setting);
+
+    if (isPMHiddenByOps) return null;
+
     // Get user-specific setting if it exists
     const userSetting = userId ? getUserSetting(userId, moduleId, setting.id) : null;
     const hasUserOverride = userSetting && userSetting.value !== undefined;
@@ -2679,8 +2710,12 @@ Which is the same as the practice-wide default. An override must differ from the
       const value = isUserOverride ? effectiveValue : setting.default;
       // Check if default setting is locked-hidden (disable default controls, but not overrides)
       const isDefaultLockedHidden = !isUserOverride && setting.pmLockState === 'locked-hidden';
+      const isDefaultLockedByOpsForPM = !isUserOverride && isPMLockedByOps;
+      const isDefaultReadOnly = isDefaultLockedHidden || isDefaultLockedByOpsForPM;
 
       const handleChange = (newValue) => {
+        // Ops inheritance: PM cannot edit defaults for ops-locked settings
+        if (!isUserOverride && isPMLockedByOps) return;
         if (isDefaultLockedHidden) return; // Prevent changes to locked-hidden defaults
 
         if (isUserOverride && targetUserId) {
@@ -2733,7 +2768,7 @@ Which is the same as the practice-wide default. An override must differ from the
       switch (setting.type) {
         case 'toggle':
           const isToggleOn = value === 'True';
-          const isToggleDisabled = !isEnabled || isDefaultLockedHidden;
+          const isToggleDisabled = !isEnabled || isDefaultReadOnly;
           return (
             <div
               className={`relative w-12 h-7 rounded-full transition-colors duration-300 ${
@@ -2764,6 +2799,7 @@ Which is the same as the practice-wide default. An override must differ from the
               <select
                 value={value}
                 onChange={(e) => handleChange(e.target.value)}
+                disabled={isDefaultReadOnly}
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
                 style={{
                   backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
@@ -2807,6 +2843,7 @@ Which is the same as the practice-wide default. An override must differ from the
                             max="30"
                             value={item === 'Future' ? futureDays : pastDays}
                             onChange={(e) => {
+                              if (isDefaultReadOnly) return;
                               const days = parseInt(e.target.value) || 1;
                               if (item === 'Future') {
                                 setFutureDays(days);
@@ -2814,6 +2851,7 @@ Which is the same as the practice-wide default. An override must differ from the
                                 setPastDays(days);
                               }
                             }}
+                            disabled={isDefaultReadOnly}
                             className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
                           />
                           <span className="text-xs text-gray-500">days</span>
@@ -2827,10 +2865,12 @@ Which is the same as the practice-wide default. An override must differ from the
                         {index > 0 && (
                           <button
                             onClick={() => {
+                              if (isDefaultReadOnly) return;
                               const newOrder = [...orderItems];
                               [newOrder[index], newOrder[index - 1]] = [newOrder[index - 1], newOrder[index]];
                               handleChange(newOrder);
                             }}
+                            disabled={isDefaultReadOnly}
                             className="text-gray-400 hover:text-blue-600 p-1"
                             title="Move up"
                           >
@@ -2840,10 +2880,12 @@ Which is the same as the practice-wide default. An override must differ from the
                         {index < orderItems.length - 1 && (
                           <button
                             onClick={() => {
+                              if (isDefaultReadOnly) return;
                               const newOrder = [...orderItems];
                               [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
                               handleChange(newOrder);
                             }}
+                            disabled={isDefaultReadOnly}
                             className="text-gray-400 hover:text-blue-600 p-1"
                             title="Move down"
                           >
@@ -2908,6 +2950,7 @@ Which is the same as the practice-wide default. An override must differ from the
                         type="checkbox"
                         checked={isSelected}
                         onChange={(e) => {
+                          if (isDefaultReadOnly) return;
                           if (!canSelect && !isSelected) return;
                           
                           let newTimes;
@@ -2919,7 +2962,7 @@ Which is the same as the practice-wide default. An override must differ from the
                           updateSettingState(moduleId, setting.id, 'default', newTimes);
                         }}
                         className="w-3 h-3"
-                        disabled={!canSelect && !isSelected}
+                        disabled={isDefaultReadOnly || (!canSelect && !isSelected)}
                       />
                       <span className="text-xs">{time}</span>
                     </label>
@@ -3054,7 +3097,7 @@ Which is the same as the practice-wide default. An override must differ from the
                 <select
                   value={defaultService}
                   onChange={(e) => handleDefaultServiceChange(e.target.value)}
-                  disabled={isDefaultLockedHidden}
+                  disabled={isDefaultReadOnly}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
                   style={{
                     backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
@@ -3100,9 +3143,9 @@ Which is the same as the practice-wide default. An override must differ from the
                     handleChange(e.target.value);
                   }
                 }}
-                disabled={isDefaultLockedHidden}
+                disabled={isDefaultReadOnly}
                 className={`w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none ${
-                  isDefaultLockedHidden ? 'bg-gray-100 cursor-not-allowed opacity-60' : 'bg-white hover:border-blue-300'
+                  isDefaultReadOnly ? 'bg-gray-100 cursor-not-allowed opacity-60' : 'bg-white hover:border-blue-300'
                 }`}
                 style={{
                   backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
@@ -3126,7 +3169,7 @@ Which is the same as the practice-wide default. An override must differ from the
                     value={isCustomSelected && value.startsWith('Custom:') ? value.split(':')[1].trim().split(' ')[0] : customDeleteDays}
                     onChange={(e) => setCustomDeleteDays(e.target.value)}
                     className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    disabled={isDefaultLockedHidden}
+                    disabled={isDefaultReadOnly}
                   />
                   <button
                     onClick={() => {
@@ -3134,7 +3177,7 @@ Which is the same as the practice-wide default. An override must differ from the
                         handleChange(`Custom: ${customDeleteDays} days`);
                       }
                     }}
-                    disabled={!customDeleteDays || parseInt(customDeleteDays) <= 0 || isDefaultLockedHidden}
+                    disabled={!customDeleteDays || parseInt(customDeleteDays) <= 0 || isDefaultReadOnly}
                     className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
                   >
                     Apply
@@ -3152,7 +3195,7 @@ Which is the same as the practice-wide default. An override must differ from the
                 const isChecked = selectedValues.includes(option);
                 const canUncheck = selectedValues.length > 1 || !isChecked;
                 const isDefault = setting.id === 41 && getSetting(moduleId, 42)?.default === option;
-                const isDisabled = !isEnabled || (isDefault && isChecked); // Disable if it's the default option
+                const isDisabled = isDefaultReadOnly || !isEnabled || (isDefault && isChecked); // Disable if it's the default option
 
                 return (
                   <label key={option} className={`flex items-center gap-3 ${isDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}>
@@ -3160,6 +3203,7 @@ Which is the same as the practice-wide default. An override must differ from the
                       type="checkbox"
                       checked={isChecked}
                       onChange={(e) => {
+                        if (isDefaultReadOnly) return;
                         if (!canUncheck && !e.target.checked) {
                           return; // Prevent unchecking last item
                         }
@@ -3201,8 +3245,14 @@ Which is the same as the practice-wide default. An override must differ from the
               type="url"
               placeholder="Enter URL"
               value={value}
-              onChange={(e) => updateSettingState(moduleId, setting.id, 'default', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors hover:border-blue-300"
+              disabled={isDefaultReadOnly}
+              onChange={(e) => {
+                if (isDefaultReadOnly) return;
+                updateSettingState(moduleId, setting.id, 'default', e.target.value);
+              }}
+              className={`w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors hover:border-blue-300 ${
+                isDefaultReadOnly ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''
+              }`}
             />
           );
 
@@ -3228,10 +3278,12 @@ Which is the same as the practice-wide default. An override must differ from the
                 ) : (
                   <button
                     onClick={() => {
+                      if (isDefaultReadOnly) return;
                       // Simulate Google sign-in
                       setIsGoogleSignedIn(true);
                       updateSettingState(moduleId, setting.id, 'default', true);
                     }}
+                    disabled={isDefaultReadOnly}
                     className="px-6 py-3 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-3 shadow-sm"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -3272,6 +3324,11 @@ Which is the same as the practice-wide default. An override must differ from the
             <div className="flex items-center gap-3 mb-2">
               <h3 className="text-lg font-semibold text-gray-900">{setting.name}</h3>
               {setting.required && <span className="text-red-500 text-sm font-medium">*</span>}
+              {isPMDefaultView && (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  Ops: {getOpsLockLabel(setting.opsLockState)}
+                </span>
+              )}
               {(showUserOverride ? userLockState : setting.pmLockState) === 'locked-visible' && (
                 <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
                   🔒 Locked by Practice
@@ -3348,10 +3405,12 @@ Which is the same as the practice-wide default. An override must differ from the
                     }
                   } else {
                     // Master user updates opsLockState, PM user updates pmLockState
+                    if (isPMLockedByOps) return;
                     const lockStateProperty = isMasterUser() ? 'opsLockState' : 'pmLockState';
                     updateSettingState(moduleId, setting.id, lockStateProperty, e.target.value);
                   }
                 }}
+                disabled={isPMLockedByOps}
                 className="px-3 py-1 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500"
               >
                 <option value="unlocked">Unlocked</option>
@@ -3433,8 +3492,13 @@ Which is the same as the practice-wide default. An override must differ from the
           </div>
         )}
 
-        {/* User Overrides Section - Only show in default settings view (not user-specific view) and not for master user */}
-        {!isMasterUser() && !showUserOverride && (moduleId === 'note-settings' || moduleId === 'controls' || moduleId === 'ehr-settings-amd' || moduleId === 'ehr-settings-athena' || moduleId === 'em-settings') && (
+        {/* User Overrides Section - Only show in default settings view (not user-specific view) */}
+        {!showUserOverride &&
+          // Only allow overrides when Ops has left the setting unlocked for PM
+          setting.opsLockState === 'unlocked' &&
+          // PM gating (Ops can always access if opsLockState is unlocked)
+          (isMasterUser() || !isPMLockedByOps) &&
+          (moduleId === 'note-settings' || moduleId === 'controls' || moduleId === 'ehr-settings-amd' || moduleId === 'ehr-settings-athena' || moduleId === 'em-settings') && (
           <div className="mt-6 pt-6 border-t border-gray-200">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -3602,7 +3666,13 @@ Which is the same as the practice-wide default. An override must differ from the
         </div>
 
         <div className="space-y-6">
-          {moduleSettings[selectedModule]?.settings.map(setting => (
+          {moduleSettings[selectedModule]?.settings
+            .filter(setting => {
+              // Ops inheritance: PM should never see ops-locked-hidden settings
+              if (!isMasterUser() && setting.opsLockState === 'locked-hidden') return false;
+              return true;
+            })
+            .map(setting => (
             <SettingRow
               key={setting.id}
               setting={setting}

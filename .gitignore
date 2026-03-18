@@ -29,3 +29,10 @@ yarn-error.log*
 
 # OS
 Thumbs.db
+
+# Local app / tool state
+npm-cache/
+.claude/
+
+# Backups
+*.backup

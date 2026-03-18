@@ -17,6 +17,10 @@ A simplified dual-role healthcare settings management system with:
 ### Key Simplification
 No separate Ops dashboard - just a master user email that can edit defaults and control PM access via lock states within the PM dashboard interface.
 
+### Implementation Reference
+For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see:
+- `docs/ACCESS_INHERITANCE_RULES.md`
+
 ---
 
 ## 2. User Roles & Permissions
@@ -34,8 +38,8 @@ No separate Ops dashboard - just a master user email that can edit defaults and 
 - ✅ Default values for all settings
 - ✅ **opsLockState** (controls what PM can see/edit)
 
-**Cannot Access:**
-- ❌ User Overrides section
+**User Overrides (Doctor-level):**
+- ✅ Can create/edit doctor overrides **only when** `opsLockState: 'unlocked'`
 
 **Purpose:**
 - Set organization-wide defaults

@@ -23,7 +23,7 @@ A complete React application for managing healthcare practice settings and user 
 
 2. **Open terminal/command prompt** and navigate to the project folder:
    ```bash
-   cd practice-settings-dashboard
+   cd settings_dashboard
    ```
 
 3. **Install dependencies**:
@@ -51,7 +51,7 @@ A complete React application for managing healthcare practice settings and user 
 ## Project Structure
 
 ```
-practice-settings-dashboard/
+settings_dashboard/
 ├── public/
 │   └── index.html
 ├── src/

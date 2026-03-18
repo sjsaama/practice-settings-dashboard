@@ -89,6 +89,7 @@ export const initialUsers = [
     email: 'lisa.parker@clinic.com',
     permissions: {
       createConsults: true,
+      mergeAndLinkAppointments: false,
       canGenerateNotes: false,
       editGeneratedNotes: false,
       pushToEHR: false
@@ -102,6 +103,7 @@ export const initialUsers = [
     email: 'alex.johnson@clinic.com',
     permissions: {
       createConsults: true,
+      mergeAndLinkAppointments: false,
       canGenerateNotes: false,
       editGeneratedNotes: false,
       pushToEHR: false

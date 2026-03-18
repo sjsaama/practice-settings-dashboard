@@ -230,26 +230,6 @@ export const settingsModules = {
     subtitle: 'Settings that control AMD EHR integration and synchronization',
     settings: [
       {
-        id: 71,
-        name: 'Appointments Range',
-        type: 'range-selector',
-        options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
-        default: '30 days',
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
-      },
-      {
-        id: 72,
-        name: 'Appointments Order',
-        type: 'order-list',
-        options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
-        default: ['Today', 'Future', 'Past'],
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
-      },
-      {
         id: 73,
         name: 'Daily appointment sync time',
         type: 'time-multiselect',
@@ -263,16 +243,6 @@ export const settingsModules = {
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
         subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-      },
-      {
-        id: 75,
-        name: 'Auto-create Consult Cards',
-        type: 'toggle',
-        options: ['On', 'Off'],
-        default: 'On',
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Automatically create consultation cards for appointments'
       },
       {
         id: 76,
@@ -301,26 +271,6 @@ export const settingsModules = {
     subtitle: 'Settings that control Athena EHR integration and synchronization',
     settings: [
       {
-        id: 81,
-        name: 'Appointments Range',
-        type: 'range-selector',
-        options: ['1 day', '3 days', '7 days', '14 days', '21 days', '30 days', '45 days', '60 days', '90 days'],
-        default: '30 days',
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'How far in the future should the appointments be pulled from the EHR / PMS / Calendar'
-      },
-      {
-        id: 82,
-        name: 'Appointments Order',
-        type: 'order-list',
-        options: ['Today', 'Future', 'Past', 'Day After Tomorrow'],
-        default: ['Today', 'Future', 'Past'],
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'In which order should they show up in the "Link Appointment" popup? Drag to reorder'
-      },
-      {
         id: 83,
         name: 'Daily appointment sync time',
         type: 'time-multiselect',
@@ -334,16 +284,6 @@ export const settingsModules = {
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
         subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-      },
-      {
-        id: 85,
-        name: 'Auto-create Consult Cards',
-        type: 'toggle',
-        options: ['On', 'Off'],
-        default: 'On',
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Automatically create consultation cards for appointments'
       },
       {
         id: 86,
