@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/rules-of-hooks */
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Settings, Users, ChevronRight, Search, Shield, X, RotateCcw } from 'lucide-react';
 import BlockedAccessScreen from './components/layout/BlockedAccessScreen';
 import {
@@ -8,7 +8,20 @@ import {
   onMasterUserSessionChange
 } from './utils/masterUserSession';
 import { canPMEditSetting, canPMSeeSetting, getOpsLockLabel } from './utils/accessPolicy';
-import { loadModuleSettingsFromStorage, MODULE_SETTINGS_STORAGE_KEY, saveModuleSettingsToStorage } from './utils/moduleSettingsStorage';
+import {
+  getModuleSettingsStorageKey,
+  loadModuleSettingsFromStorage,
+  saveModuleSettingsToStorage
+} from './utils/moduleSettingsStorage';
+import {
+  getUserSettingsOverridesStorageKey,
+  loadUserSettingsOverridesFromStorage,
+  saveUserSettingsOverridesToStorage,
+} from './utils/userSettingsOverridesStorage';
+import {
+  loadLinkedAccountsFromStorage,
+  saveLinkedAccountsToStorage,
+} from './utils/linkedAccountsStorage';
 
 // Helper function to generate time options based on timezone
 const getTimeOptionsForTimezone = (timezone) => {
@@ -39,13 +52,11 @@ const getTimeOptionsForTimezone = (timezone) => {
   });
 };
 
-const PracticeSettingsDashboard = () => {
-  // Master User / Role Management
-  const MASTER_USER_EMAIL = 'ops@marvix.com';
-  const [currentUserEmail, setCurrentUserEmail] = useState('pm@practice.com');
-
-  // Helper to check if current user is master user
-  const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
+const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLogout }) => {
+  // Auth (provided by App)
+  const currentUserEmail = authSession?.email || 'pm@practice.com';
+  const currentUserRole = authSession?.role || 'pm';
+  const isMasterUser = () => currentUserRole === 'ops';
 
   // ==================== ACCESS CONTROL ====================
 
@@ -69,8 +80,8 @@ const PracticeSettingsDashboard = () => {
   const [showAddOverrideModal, setShowAddOverrideModal] = useState(false);
   const [currentOverrideSetting, setCurrentOverrideSetting] = useState(null);
   const [selectedNewUser, setSelectedNewUser] = useState('');
-  const [linkStartDate, setLinkStartDate] = useState('');
-  const [linkEndDate, setLinkEndDate] = useState('');
+  const [newLinkAssignmentType, setNewLinkAssignmentType] = useState('assistant'); // assistant | coverage
+  const [linkDateError, setLinkDateError] = useState('');
   const [showAddUserTypeModal, setShowAddUserTypeModal] = useState(false);
   const [showAddPrimaryAccountModal, setShowAddPrimaryAccountModal] = useState(false);
   const [primaryAccountType, setPrimaryAccountType] = useState(''); // 'request' or 'copy'
@@ -86,7 +97,6 @@ const PracticeSettingsDashboard = () => {
   const [hipaaAttestationUser, setHipaaAttestationUser] = useState(null);
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [showGoogleSignoutModal, setShowGoogleSignoutModal] = useState(false);
-  const [isZoomAppInstalled, setIsZoomAppInstalled] = useState(false);
   const [customDeleteDays, setCustomDeleteDays] = useState('');
   const [futureDays, setFutureDays] = useState(1); // Days for Future appointments
   const [pastDays, setPastDays] = useState(1); // Days for Past appointments
@@ -104,35 +114,75 @@ const PracticeSettingsDashboard = () => {
   });
   const [showOverrideCleanupModal, setShowOverrideCleanupModal] = useState(false);
   const [overrideCleanupData, setOverrideCleanupData] = useState(null);
-  const [userSettingsOverrides, setUserSettingsOverrides] = useState({});
-  const [linkedAccounts, setLinkedAccounts] = useState([
-    {
-      id: 'lisa_parker',
-      name: 'Lisa Parker, RN',
-      role: 'Cardiology Nurse',
-      email: 'lisa.parker@clinic.com',
-      permissions: {
-        createConsults: true,
-        mergeAndLinkAppointments: false,
-        canGenerateNotes: false,
-        editGeneratedNotes: false,
-        pushToEHR: false
+  const [showOpsHideOverridesModal, setShowOpsHideOverridesModal] = useState(false);
+  const [opsHideOverridesData, setOpsHideOverridesData] = useState(null);
+  const [showOpsLockVisibleOverridesModal, setShowOpsLockVisibleOverridesModal] = useState(false);
+  const [opsLockVisibleOverridesData, setOpsLockVisibleOverridesData] = useState(null);
+  const [showServiceDisableRepairModal, setShowServiceDisableRepairModal] = useState(false);
+  const [serviceDisableRepairData, setServiceDisableRepairData] = useState(null);
+  const [showServiceRepairBanner, setShowServiceRepairBanner] = useState(false);
+  const [pendingServiceRepairData, setPendingServiceRepairData] = useState(null);
+  const [showCrossTabUpdateBanner, setShowCrossTabUpdateBanner] = useState(false);
+  const [pendingCrossTabModuleSettings, setPendingCrossTabModuleSettings] = useState(null);
+  const [showCrossTabOverridesBanner, setShowCrossTabOverridesBanner] = useState(false);
+  const [pendingCrossTabOverrides, setPendingCrossTabOverrides] = useState(null);
+  const [crossTabToast, setCrossTabToast] = useState(null);
+  const [userSettingsOverrides, setUserSettingsOverrides] = useState(() => {
+    const saved = loadUserSettingsOverridesFromStorage(practiceId);
+    return saved || {};
+  });
+  const [linkedAccounts, setLinkedAccounts] = useState(() => {
+    const saved = loadLinkedAccountsFromStorage(practiceId);
+    if (saved) return saved;
+
+    // Seed demo data for first run only.
+    return [
+      {
+        linkId: 'link_lisa_seed',
+        assigneeUserId: 'lisa_parker',
+        assigneeType: 'secondary',
+        assignmentType: 'assistant',
+        secondaryUserId: 'lisa_parker',
+        id: 'lisa_parker',
+        name: 'Lisa Parker, RN',
+        role: 'Cardiology Nurse',
+        email: 'lisa.parker@clinic.com',
+        permissions: {
+          createConsults: true,
+          mergeAndLinkAppointments: false,
+          canGenerateNotes: false,
+          editGeneratedNotes: false,
+          pushToEHR: false
+        },
+        linkedToDoctorId: 1,
+        linkedToDoctorName: 'Dr. Sarah Johnson',
+        startDate: '2026-03-01',
+        endDate: '2026-03-31'
+      },
+      {
+        linkId: 'link_jennifer_seed',
+        assigneeUserId: 'jennifer_walsh',
+        assigneeType: 'secondary',
+        assignmentType: 'assistant',
+        secondaryUserId: 'jennifer_walsh',
+        id: 'jennifer_walsh',
+        name: 'Jennifer Walsh',
+        role: 'Medical Assistant',
+        email: 'jennifer.walsh@clinic.com',
+        permissions: {
+          createConsults: true,
+          mergeAndLinkAppointments: false,
+          canGenerateNotes: true,
+          editGeneratedNotes: true,
+          pushToEHR: false
+        },
+        linkedToDoctorId: 2,
+        linkedToDoctorName: 'Dr. Michael Chen',
+        startDate: '2026-03-05',
+        endDate: '2026-04-05'
       }
-    },
-    {
-      id: 'jennifer_walsh',
-      name: 'Jennifer Walsh',
-      role: 'Medical Assistant',
-      email: 'jennifer.walsh@clinic.com',
-      permissions: {
-        createConsults: true,
-        mergeAndLinkAppointments: false,
-        canGenerateNotes: true,
-        editGeneratedNotes: true,
-        pushToEHR: false
-      }
-    }
-  ]);
+    ];
+  });
   const [allUsers, setAllUsers] = useState([
     { id: 1, name: 'Dr. Sarah Johnson', type: 'primary', specialty: 'Cardiology', email: 'sarah.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
     { id: 2, name: 'Dr. Michael Chen', type: 'primary', specialty: 'Neurology', email: 'michael.chen@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
@@ -142,6 +192,11 @@ const PracticeSettingsDashboard = () => {
     { id: 'sec1', name: 'Lisa Parker', type: 'secondary', role: 'Nurse', email: 'lisa.parker@clinic.com', permissions: { createConsults: true, mergeAndLinkAppointments: false, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } },
     { id: 'sec2', name: 'Alex Johnson', type: 'secondary', role: 'Lab Technician', email: 'alex.johnson@clinic.com', permissions: { createConsults: true, mergeAndLinkAppointments: false, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } }
   ]);
+
+  const getAssignmentAssigneeId = (assignment) =>
+    String(assignment?.assigneeUserId ?? assignment?.secondaryUserId ?? assignment?.id ?? '');
+  const getAssignmentType = (assignment) => assignment?.assignmentType || 'assistant';
+  const getAssignmentAssigneeType = (assignment) => assignment?.assigneeType || 'secondary';
   const [showAddSecondaryAccountModal, setShowAddSecondaryAccountModal] = useState(false);
   const [newSecondaryAccount, setNewSecondaryAccount] = useState({
     name: '',
@@ -159,7 +214,7 @@ const PracticeSettingsDashboard = () => {
   // Initialize moduleSettings with lazy initializer
   // settingsModules is defined later in the component, so we use a function to defer evaluation
   const [moduleSettings, setModuleSettings] = useState(() => {
-    const saved = loadModuleSettingsFromStorage();
+    const saved = loadModuleSettingsFromStorage(practiceId);
     if (saved) return saved;
 
     // Settings data structure - Complete with all settings
@@ -497,18 +552,193 @@ const PracticeSettingsDashboard = () => {
 
   // Persist module settings so Ops changes apply to PM sessions/tabs
   useEffect(() => {
-    saveModuleSettingsToStorage(moduleSettings);
+    saveModuleSettingsToStorage(moduleSettings, practiceId);
+  }, [moduleSettings, practiceId]);
+
+  // Persist user overrides so behavior is consistent across sessions/tabs
+  useEffect(() => {
+    saveUserSettingsOverridesToStorage(userSettingsOverrides, practiceId);
+  }, [userSettingsOverrides, practiceId]);
+
+  // Persist linked secondary accounts per practice
+  useEffect(() => {
+    saveLinkedAccountsToStorage(linkedAccounts, practiceId);
+  }, [linkedAccounts, practiceId]);
+
+  const computeServiceSettingsRepairs = useCallback(() => {
+    // Service Settings: moduleId is 'em-settings', settingId is 41
+    const moduleId = 'em-settings';
+    const settingId = 41;
+    const serviceSetting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
+    if (!serviceSetting) return null;
+
+    const practiceEnabled = Array.isArray(serviceSetting.default) ? serviceSetting.default : [];
+    if (practiceEnabled.length === 0) return null;
+
+    const practiceDefaultService = serviceSetting.defaultService || practiceEnabled[0];
+
+    const impactedUsers = [];
+    const suffix = `-${moduleId}-${settingId}`;
+    Object.keys(userSettingsOverrides).forEach((key) => {
+      if (!key.endsWith(suffix)) return;
+      const userId = key.slice(0, -suffix.length);
+      const override = userSettingsOverrides[key];
+      if (!override) return;
+
+      const user = allUsers.find(u => u.id.toString() === userId);
+      const userName = user?.name || `User ${userId}`;
+
+      const hasEnabledOverride = Array.isArray(override.value);
+      const oldEnabledServices = hasEnabledOverride ? override.value : practiceEnabled;
+
+      // Enforce that user-enabled services cannot include disabled practice services
+      const repairedEnabledServicesCandidate = oldEnabledServices.filter(s => practiceEnabled.includes(s));
+      const repairedEnabledServices = repairedEnabledServicesCandidate.length > 0 ? repairedEnabledServicesCandidate : [practiceEnabled[0]];
+
+      const hasDefaultServiceOverride = typeof override.defaultService === 'string' && override.defaultService.length > 0;
+      const oldDefaultService = hasDefaultServiceOverride ? override.defaultService : (practiceDefaultService || repairedEnabledServices[0]);
+      const newDefaultService = repairedEnabledServices.includes(oldDefaultService) ? oldDefaultService : repairedEnabledServices[0];
+
+      const enabledServicesChanged = oldEnabledServices.join('|') !== repairedEnabledServices.join('|');
+      const defaultServiceChanged = oldDefaultService !== newDefaultService;
+
+      if (!enabledServicesChanged && !defaultServiceChanged) return;
+
+      impactedUsers.push({
+        userId,
+        userName,
+        oldEnabledServices,
+        newEnabledServices: repairedEnabledServices,
+        oldDefaultService,
+        newDefaultService,
+        shouldUpdateEnabledServices: hasEnabledOverride && enabledServicesChanged,
+        shouldUpdateDefaultService: hasDefaultServiceOverride && defaultServiceChanged
+      });
+    });
+
+    const practiceDefaultServiceRepairNeeded = !practiceEnabled.includes(practiceDefaultService);
+
+    if (impactedUsers.length === 0 && !practiceDefaultServiceRepairNeeded) return null;
+
+    return {
+      moduleId,
+      settingId,
+      practiceEnabledServices: practiceEnabled,
+      currentPracticeDefaultService: practiceDefaultService,
+      impactedUsers,
+      practiceDefaultServiceRepairNeeded
+    };
+  }, [allUsers, moduleSettings, userSettingsOverrides]);
+
+  // Detect invalid service overrides even if changes didn't come from checkbox UI
+  useEffect(() => {
+    const repairPlan = computeServiceSettingsRepairs();
+    if (!repairPlan) {
+      setShowServiceRepairBanner(false);
+      setPendingServiceRepairData(null);
+      return;
+    }
+
+    // If we're mid-flow, don't pop banners/modals; queue it for later.
+    const isMidFlow =
+      showAddOverrideModal ||
+      showOverrideCleanupModal ||
+      showOverrideConfirmModal ||
+      showOpsHideOverridesModal ||
+      showServiceDisableRepairModal ||
+      showAddSecondaryAccountModal ||
+      showAddPrimaryAccountModal ||
+      showLinkAccountModal ||
+      showSuspendModal ||
+      showResetPinModal;
+
+    if (isMidFlow) {
+      setPendingServiceRepairData(repairPlan);
+      setShowServiceRepairBanner(true);
+      return;
+    }
+
+    setPendingServiceRepairData(repairPlan);
+    setShowServiceRepairBanner(true);
+  }, [
+    computeServiceSettingsRepairs,
+    moduleSettings,
+    userSettingsOverrides,
+    showAddOverrideModal,
+    showOverrideCleanupModal,
+    showOverrideConfirmModal,
+    showOpsHideOverridesModal,
+    showServiceDisableRepairModal,
+    showAddSecondaryAccountModal,
+    showAddPrimaryAccountModal,
+    showLinkAccountModal,
+    showSuspendModal,
+    showResetPinModal
+  ]);
+
+  // Normalize dependent settings to avoid invalid defaults (no updates during render)
+  useEffect(() => {
+    let didChange = false;
+
+    const next = Object.fromEntries(
+      Object.entries(moduleSettings).map(([moduleId, module]) => {
+        const nextSettings = module.settings.map((setting) => {
+          if (!setting?.dependency) return setting;
+
+          // Dependent dropdown normalization (legacy: dependency === 41 service settings)
+          if (setting.type === 'dropdown' && setting.dependency === 41) {
+            const availableOptions = getAvailableOptions(setting);
+            if (
+              Array.isArray(availableOptions) &&
+              availableOptions.length > 0 &&
+              !availableOptions.includes(setting.default) &&
+              setting.pmLockState !== 'locked-hidden'
+            ) {
+              didChange = true;
+              return { ...setting, default: availableOptions[0] };
+            }
+          }
+
+          return setting;
+        });
+
+        return [moduleId, nextSettings === module.settings ? module : { ...module, settings: nextSettings }];
+      })
+    );
+
+    if (didChange) {
+      setModuleSettings(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleSettings]);
 
   // Cross-tab sync: if Ops changes in another tab, update in this tab
   useEffect(() => {
     const handleStorage = (event) => {
-      if (event.key !== MODULE_SETTINGS_STORAGE_KEY) return;
+      if (event.key !== getModuleSettingsStorageKey(practiceId)) return;
       if (!event.newValue) return;
       try {
         const parsed = JSON.parse(event.newValue);
         if (parsed && typeof parsed === 'object') {
+          const isMidFlow =
+            showAddOverrideModal ||
+            showOverrideCleanupModal ||
+            showOverrideConfirmModal ||
+            showOpsHideOverridesModal ||
+            showAddSecondaryAccountModal ||
+            showAddPrimaryAccountModal ||
+            showLinkAccountModal ||
+            showSuspendModal ||
+            showResetPinModal;
+
+          if (isMidFlow) {
+            setPendingCrossTabModuleSettings(parsed);
+            setShowCrossTabUpdateBanner(true);
+            return;
+          }
+
           setModuleSettings(parsed);
+          setCrossTabToast('Settings updated in another tab.');
         }
       } catch (e) {
         // Ignore malformed values
@@ -517,12 +747,80 @@ const PracticeSettingsDashboard = () => {
 
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+  }, [
+    practiceId,
+    showAddOverrideModal,
+    showOverrideCleanupModal,
+    showOverrideConfirmModal,
+    showOpsHideOverridesModal,
+    showAddSecondaryAccountModal,
+    showAddPrimaryAccountModal,
+    showLinkAccountModal,
+    showSuspendModal,
+    showResetPinModal
+  ]);
+
+  // Cross-tab sync for user overrides
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key !== getUserSettingsOverridesStorageKey(practiceId)) return;
+      if (!event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue);
+        if (!parsed || typeof parsed !== 'object') return;
+
+        const isMidFlow =
+          showAddOverrideModal ||
+          showOverrideCleanupModal ||
+          showOverrideConfirmModal ||
+          showOpsHideOverridesModal ||
+          showServiceDisableRepairModal ||
+          showAddSecondaryAccountModal ||
+          showAddPrimaryAccountModal ||
+          showLinkAccountModal ||
+          showSuspendModal ||
+          showResetPinModal;
+
+        if (isMidFlow) {
+          setPendingCrossTabOverrides(parsed);
+          setShowCrossTabOverridesBanner(true);
+          return;
+        }
+
+        setUserSettingsOverrides(parsed);
+        setCrossTabToast('Overrides updated in another tab.');
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [
+    practiceId,
+    showAddOverrideModal,
+    showOverrideCleanupModal,
+    showOverrideConfirmModal,
+    showOpsHideOverridesModal,
+    showServiceDisableRepairModal,
+    showAddSecondaryAccountModal,
+    showAddPrimaryAccountModal,
+    showLinkAccountModal,
+    showSuspendModal,
+    showResetPinModal
+  ]);
+
+  // Auto-clear cross-tab toast
+  useEffect(() => {
+    if (!crossTabToast) return;
+    const t = setTimeout(() => setCrossTabToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [crossTabToast]);
 
   // Validate access on mount and when user changes
   useEffect(() => {
     const checkAccess = () => {
-      if (isMasterUser()) {
+      if (currentUserRole === 'ops') {
         // Check if another master user is active
         const { canLogin, reason, activeUser: activeMasterUser } = canLoginAsMasterUser(currentUserEmail);
 
@@ -559,14 +857,14 @@ const PracticeSettingsDashboard = () => {
     });
 
     return cleanup;
-  }, [currentUserEmail]);
+  }, [currentUserEmail, currentUserRole]);
 
   // Reset user view when user changes
   useEffect(() => {
     if (selectedUser) {
       setSelectedUserView(selectedUser.type === 'secondary' ? 'permissions' : 'link-secondary');
     }
-  }, [selectedUser?.id]);
+  }, [selectedUser]);
 
   // If blocked, show blocked access screen
   if (isBlocked) {
@@ -624,6 +922,32 @@ const PracticeSettingsDashboard = () => {
           }
         }
       }
+    });
+    return overrides;
+  };
+
+  // Helper function to get all override records for a specific setting (value OR lockState OR defaultService)
+  const getAllOverrideRecordsForSetting = (moduleId, settingId) => {
+    const overrides = [];
+    Object.keys(userSettingsOverrides).forEach(key => {
+      const suffix = `-${moduleId}-${settingId}`;
+      if (!key.endsWith(suffix)) return;
+
+      const userId = key.slice(0, -suffix.length);
+      const override = userSettingsOverrides[key];
+      if (!override) return;
+
+      const hasAnyOverrideData =
+        override.value !== undefined ||
+        override.pmLockState !== undefined ||
+        override.defaultService !== undefined;
+      if (!hasAnyOverrideData) return;
+
+      const user = allUsers.find(u => u.id.toString() === userId);
+      overrides.push({
+        userId,
+        userName: user?.name || `User ${userId}`
+      });
     });
     return overrides;
   };
@@ -771,10 +1095,17 @@ Which is the same as the practice-wide default. An override must differ from the
     if (!isMasterUser()) {
       const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
       const opsLocked = setting && !canPMEditSetting(setting);
+      const parentSetting = setting?.dependency ? getSettingById(setting.dependency) : null;
+      const parentOpsLocked = parentSetting && !canPMEditSetting(parentSetting);
       const pmAttemptingRestrictedChange =
         property === 'default' || property === 'pmLockState' || property === 'defaultService';
 
-      if (opsLocked && pmAttemptingRestrictedChange) {
+      if ((opsLocked || parentOpsLocked) && pmAttemptingRestrictedChange) {
+        return;
+      }
+
+      // Dependency enforcement: if the dependency is currently disabled, PM should not be able to change the dependent.
+      if (setting?.dependency && !isSettingEnabled(setting) && pmAttemptingRestrictedChange) {
         return;
       }
     }
@@ -830,12 +1161,16 @@ Which is the same as the practice-wide default. An override must differ from the
     return moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
   };
 
+  const getSettingById = (settingId) => {
+    return Object.values(moduleSettings)
+      .flatMap(module => module.settings)
+      .find(s => s.id === settingId);
+  };
+
   const isSettingEnabled = (setting) => {
     if (!setting.dependency) return true;
 
-    const dependentSetting = Object.values(moduleSettings)
-      .flatMap(module => module.settings)
-      .find(s => s.id === setting.dependency);
+    const dependentSetting = getSettingById(setting.dependency);
 
     // Handle toggle dependencies (default is 'True' or 'False')
     if (dependentSetting?.default === 'True') return true;
@@ -1355,6 +1690,351 @@ Which is the same as the practice-wide default. An override must differ from the
     )
   );
 
+  const OpsHideOverridesModal = () => (
+    showOpsHideOverridesModal && opsHideOverridesData && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Confirm: Hide Setting (Overrides Will Be Removed)</h3>
+            <button
+              onClick={() => {
+                setShowOpsHideOverridesModal(false);
+                setOpsHideOverridesData(null);
+              }}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="mb-6">
+            <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded mb-4">
+              <p className="text-sm text-red-900 font-semibold mb-2">
+                You are setting Ops Lock to <span className="font-bold">Locked (Hidden)</span>.
+              </p>
+              <p className="text-sm text-red-800 leading-relaxed">
+                This will permanently remove existing doctor overrides for this setting so there are no hidden, still-effective overrides.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Setting:</span>
+                <span className="text-sm text-gray-900 font-medium">{opsHideOverridesData.settingName}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Overrides to remove:</span>
+                <span className="text-sm text-red-700 font-medium">
+                  {opsHideOverridesData.overridesToRemove.length}
+                </span>
+              </div>
+            </div>
+
+            {opsHideOverridesData.overridesToRemove.length > 0 && (
+              <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+                <p className="text-sm font-semibold text-red-900 mb-3">
+                  Affected doctors/users:
+                </p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {opsHideOverridesData.overridesToRemove.map((o) => (
+                    <div key={o.userId} className="flex items-center justify-between bg-white p-3 rounded border border-red-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                          <Users className="w-4 h-4 text-red-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{o.userName}</p>
+                          <p className="text-xs text-gray-600">Override will be removed</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => {
+                setShowOpsHideOverridesModal(false);
+                setOpsHideOverridesData(null);
+              }}
+              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (opsHideOverridesData) {
+                  removeMultipleOverrides(
+                    opsHideOverridesData.overridesToRemove,
+                    opsHideOverridesData.moduleId,
+                    opsHideOverridesData.settingId
+                  );
+                  updateSettingState(
+                    opsHideOverridesData.moduleId,
+                    opsHideOverridesData.settingId,
+                    'opsLockState',
+                    'locked-hidden'
+                  );
+                }
+                setShowOpsHideOverridesModal(false);
+                setOpsHideOverridesData(null);
+              }}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Confirm & Remove Overrides
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  );
+
+  const OpsLockVisibleOverridesModal = () => (
+    showOpsLockVisibleOverridesModal && opsLockVisibleOverridesData && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Ops Lock: Locked (Visible)</h3>
+            <button
+              onClick={() => {
+                setShowOpsLockVisibleOverridesModal(false);
+                setOpsLockVisibleOverridesData(null);
+              }}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="mb-6 space-y-4">
+            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
+              <p className="text-sm text-amber-900 font-semibold mb-2">
+                You are setting Ops Lock to <span className="font-bold">Locked (Visible)</span>.
+              </p>
+              <p className="text-sm text-amber-800 leading-relaxed">
+                PM will still see this setting but cannot change defaults or manage overrides while it is Ops-locked.
+                Existing doctor overrides can either be kept (and will reappear if Ops unlocks later) or removed now.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Setting:</span>
+                <span className="text-sm text-gray-900 font-medium">{opsLockVisibleOverridesData.settingName}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Existing overrides:</span>
+                <span className="text-sm text-amber-700 font-medium">
+                  {opsLockVisibleOverridesData.overridesToRemove.length}
+                </span>
+              </div>
+            </div>
+
+            {opsLockVisibleOverridesData.overridesToRemove.length > 0 && (
+              <div className="border border-amber-200 rounded-lg p-4 bg-amber-50">
+                <p className="text-sm font-semibold text-amber-900 mb-3">
+                  Affected doctors/users:
+                </p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {opsLockVisibleOverridesData.overridesToRemove.map((o) => (
+                    <div key={o.userId} className="flex items-center justify-between bg-white p-3 rounded border border-amber-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
+                          <Users className="w-4 h-4 text-amber-700" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{o.userName}</p>
+                          <p className="text-xs text-gray-600">Override exists for this setting</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => {
+                // Keep overrides, just apply ops lock visible
+                if (opsLockVisibleOverridesData) {
+                  updateSettingState(
+                    opsLockVisibleOverridesData.moduleId,
+                    opsLockVisibleOverridesData.settingId,
+                    'opsLockState',
+                    'locked-visible'
+                  );
+                }
+                setShowOpsLockVisibleOverridesModal(false);
+                setOpsLockVisibleOverridesData(null);
+              }}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Keep overrides
+            </button>
+            <button
+              onClick={() => {
+                if (opsLockVisibleOverridesData) {
+                  removeMultipleOverrides(
+                    opsLockVisibleOverridesData.overridesToRemove,
+                    opsLockVisibleOverridesData.moduleId,
+                    opsLockVisibleOverridesData.settingId
+                  );
+                  updateSettingState(
+                    opsLockVisibleOverridesData.moduleId,
+                    opsLockVisibleOverridesData.settingId,
+                    'opsLockState',
+                    'locked-visible'
+                  );
+                }
+                setShowOpsLockVisibleOverridesModal(false);
+                setOpsLockVisibleOverridesData(null);
+              }}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+            >
+              Remove overrides & lock
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  );
+
+  const ServiceDisableRepairModal = () => (
+    showServiceDisableRepairModal && serviceDisableRepairData && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-xl p-8 max-w-3xl w-full mx-4 shadow-2xl">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Confirm: Disable Service (Overrides Will Be Repaired)</h3>
+            <button
+              onClick={() => {
+                setShowServiceDisableRepairModal(false);
+                setServiceDisableRepairData(null);
+              }}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="mb-6 space-y-4">
+            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
+              <p className="text-sm text-amber-900 font-semibold mb-2">
+                You are disabling: <span className="font-bold">{serviceDisableRepairData.removedService}</span>
+              </p>
+              <p className="text-sm text-amber-800 leading-relaxed">
+                This will update any doctor/user overrides that reference this service so there are no invalid default services or enabled-service lists.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Affected users:</span>
+                <span className="text-sm text-amber-700 font-medium">
+                  {serviceDisableRepairData.impactedUsers.length}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Resulting enabled services:</span>
+                <span className="text-sm text-gray-900 font-medium">
+                  {serviceDisableRepairData.newEnabledServices.join(', ')}
+                </span>
+              </div>
+            </div>
+
+            {serviceDisableRepairData.impactedUsers.length > 0 && (
+              <div className="border border-amber-200 rounded-lg p-4 bg-amber-50">
+                <p className="text-sm font-semibold text-amber-900 mb-3">
+                  Overrides to repair:
+                </p>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {serviceDisableRepairData.impactedUsers.map((u) => (
+                    <div key={u.userId} className="bg-white p-3 rounded border border-amber-100">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
+                            <Users className="w-4 h-4 text-amber-700" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{u.userName}</p>
+                            <p className="text-xs text-gray-600">
+                              Default service: <span className="font-medium">{u.oldDefaultService}</span> →{' '}
+                              <span className="font-medium">{u.newDefaultService}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-700">
+                          Enabled: {u.oldEnabledServices.join(', ')} → {u.newEnabledServices.join(', ')}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => {
+                setShowServiceDisableRepairModal(false);
+                setServiceDisableRepairData(null);
+              }}
+              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (serviceDisableRepairData) {
+                  // Repair impacted overrides
+                  serviceDisableRepairData.impactedUsers.forEach((u) => {
+                    if (u.shouldUpdateEnabledServices) {
+                      setUserSetting(u.userId, serviceDisableRepairData.moduleId, serviceDisableRepairData.settingId, 'value', u.newEnabledServices);
+                    }
+                    if (u.shouldUpdateDefaultService) {
+                      setUserSetting(u.userId, serviceDisableRepairData.moduleId, serviceDisableRepairData.settingId, 'defaultService', u.newDefaultService);
+                    }
+                  });
+
+                  // Apply the practice-level change
+                  updateSettingState(
+                    serviceDisableRepairData.moduleId,
+                    serviceDisableRepairData.settingId,
+                    'default',
+                    serviceDisableRepairData.newEnabledServices
+                  );
+
+                  // Ensure practice defaultService remains valid
+                  if (
+                    serviceDisableRepairData.newEnabledServices.length > 0 &&
+                    !serviceDisableRepairData.newEnabledServices.includes(serviceDisableRepairData.currentPracticeDefaultService)
+                  ) {
+                    updateSettingState(
+                      serviceDisableRepairData.moduleId,
+                      serviceDisableRepairData.settingId,
+                      'defaultService',
+                      serviceDisableRepairData.newEnabledServices[0]
+                    );
+                  }
+                }
+                setShowServiceDisableRepairModal(false);
+                setServiceDisableRepairData(null);
+              }}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+            >
+              Confirm & Repair Overrides
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  );
+
   const GoogleSignoutConfirmModal = () => (
     showGoogleSignoutModal && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1415,7 +2095,8 @@ Which is the same as the practice-wide default. An override must differ from the
           setOverrideDefaultService(defaultValue.defaultService || enabledServices[0]);
         }
       }
-    }, [showAddOverrideModal, currentOverrideSetting, overrideValue]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [overrideValue]);
 
     // Clear validation error when user makes changes
     React.useEffect(() => {
@@ -2505,76 +3186,75 @@ Which is the same as the practice-wide default. An override must differ from the
   };
 
   const LinkAccountModal = () => {
-    const availableUsers = [
-      { id: 'nurse1', name: 'Lisa Parker, RN', role: 'Cardiology Nurse', email: 'lisa.parker@clinic.com' },
-      { id: 'nurse2', name: 'Michael Torres, RN', role: 'ICU Nurse', email: 'michael.torres@clinic.com' },
-      { id: 'nurse3', name: 'Sarah Kim, RN', role: 'Pediatric Nurse', email: 'sarah.kim@clinic.com' },
-      { id: 'assistant1', name: 'Jennifer Walsh', role: 'Medical Assistant', email: 'jennifer.walsh@clinic.com' },
-      { id: 'assistant2', name: 'David Chen', role: 'Clinical Assistant', email: 'david.chen@clinic.com' },
-      { id: 'assistant3', name: 'Maria Rodriguez', role: 'Administrative Assistant', email: 'maria.rodriguez@clinic.com' },
-      { id: 'pa1', name: 'Dr. Amanda Foster, PA-C', role: 'Physician Assistant', email: 'amanda.foster@clinic.com' },
-      { id: 'np1', name: 'Dr. Robert Taylor, NP', role: 'Nurse Practitioner', email: 'robert.taylor@clinic.com' },
-      { id: 'tech1', name: 'Alex Johnson', role: 'Medical Technician', email: 'alex.johnson@clinic.com' },
-      { id: 'tech2', name: 'Emily Brown', role: 'Lab Technician', email: 'emily.brown@clinic.com' }
+    const seededSecondaryCandidates = [
+      { id: 'nurse1', name: 'Lisa Parker, RN', role: 'Cardiology Nurse', email: 'lisa.parker@clinic.com', type: 'secondary' },
+      { id: 'nurse2', name: 'Michael Torres, RN', role: 'ICU Nurse', email: 'michael.torres@clinic.com', type: 'secondary' },
+      { id: 'nurse3', name: 'Sarah Kim, RN', role: 'Pediatric Nurse', email: 'sarah.kim@clinic.com', type: 'secondary' },
+      { id: 'assistant1', name: 'Jennifer Walsh', role: 'Medical Assistant', email: 'jennifer.walsh@clinic.com', type: 'secondary' },
+      { id: 'assistant2', name: 'David Chen', role: 'Clinical Assistant', email: 'david.chen@clinic.com', type: 'secondary' },
+      { id: 'assistant3', name: 'Maria Rodriguez', role: 'Administrative Assistant', email: 'maria.rodriguez@clinic.com', type: 'secondary' },
+      { id: 'pa1', name: 'Dr. Amanda Foster, PA-C', role: 'Physician Assistant', email: 'amanda.foster@clinic.com', type: 'secondary' },
+      { id: 'np1', name: 'Dr. Robert Taylor, NP', role: 'Nurse Practitioner', email: 'robert.taylor@clinic.com', type: 'secondary' },
+      { id: 'tech1', name: 'Alex Johnson', role: 'Medical Technician', email: 'alex.johnson@clinic.com', type: 'secondary' },
+      { id: 'tech2', name: 'Emily Brown', role: 'Lab Technician', email: 'emily.brown@clinic.com', type: 'secondary' }
     ];
 
-    const selectedUserData = availableUsers.find(u => u.id === selectedNewUser);
+    const userCandidatesFromDirectory = allUsers
+      .filter((u) => u.id !== selectedUser?.id)
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        role: u.type === 'primary' ? `Doctor (${u.specialty || 'General'})` : (u.role || 'Secondary'),
+        email: u.email,
+        type: u.type
+      }));
 
-    const updateNewUserPermission = (permission, value) => {
-      setNewUserPermissions(prev => {
-        const updated = { ...prev, [permission]: value };
-        
-        // Handle dependencies
-        if (permission === 'canGenerateNotes' && !value) {
-          // If disabling canGenerateNotes, also disable dependent permissions
-          updated.editGeneratedNotes = false;
-          updated.pushToEHR = false;
-        } else if (permission === 'editGeneratedNotes' && !value) {
-          // If disabling editGeneratedNotes, also disable pushToEHR
-          updated.pushToEHR = false;
-        }
-        
-        return updated;
-      });
-    };
+    const dedupe = new Map();
+    [...userCandidatesFromDirectory, ...seededSecondaryCandidates].forEach((u) => {
+      if (!dedupe.has(String(u.id))) dedupe.set(String(u.id), u);
+    });
+    const availableUsers = Array.from(dedupe.values());
 
-    const isPermissionEnabled = (permission) => {
-      switch (permission) {
-        case 'createConsults':
-          return true; // Always available
-        case 'canGenerateNotes':
-          return true; // Always available
-        case 'editGeneratedNotes':
-          return newUserPermissions.canGenerateNotes; // Depends on canGenerateNotes
-        case 'pushToEHR':
-          return newUserPermissions.canGenerateNotes && newUserPermissions.editGeneratedNotes; // Depends on both
-        default:
-          return false;
-      }
-    };
+    const selectedUserData = availableUsers.find((u) => String(u.id) === String(selectedNewUser));
 
     const handleLinkAccount = () => {
-      if (!selectedUserData || !linkStartDate || !linkEndDate) return;
+      if (!selectedUserData) return;
+
+      const hasDuplicateAssignment = linkedAccounts.some((link) => {
+        const existingAssigneeId = getAssignmentAssigneeId(link);
+        const isSameAssignee = existingAssigneeId === String(selectedUserData.id);
+        const isSameDoctor = String(link.linkedToDoctorId) === String(selectedUser.id);
+        const existingType = getAssignmentType(link);
+        const isSameAssignmentType = existingType === newLinkAssignmentType;
+        return isSameAssignee && isSameDoctor && isSameAssignmentType;
+      });
+
+      if (hasDuplicateAssignment) {
+        setLinkDateError('This assignment already exists for the selected user and doctor.');
+        return;
+      }
 
       const newAccount = {
-        id: selectedUserData.id,
+        linkId: `link_${Date.now()}`,
+        assigneeUserId: selectedUserData.id,
+        assigneeType: selectedUserData.type || 'secondary',
+        assignmentType: newLinkAssignmentType,
         name: selectedUserData.name,
         role: selectedUserData.role,
         email: selectedUserData.email,
         permissions: { ...newUserPermissions },
         linkedToDoctorId: selectedUser.id,
-        linkedToDoctorName: selectedUser.name,
-        startDate: linkStartDate,
-        endDate: linkEndDate
+        linkedToDoctorName: selectedUser.name
       };
 
       setLinkedAccounts(prev => [...prev, newAccount]);
       setShowLinkAccountModal(false);
       setSelectedNewUser('');
-      setLinkStartDate('');
-      setLinkEndDate('');
+      setNewLinkAssignmentType('assistant');
+      setLinkDateError('');
       setNewUserPermissions({
         createConsults: true,
+        mergeAndLinkAppointments: false,
         canGenerateNotes: false,
         editGeneratedNotes: false,
         pushToEHR: false
@@ -2587,21 +3267,27 @@ Which is the same as the practice-wide default. An override must differ from the
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Link New Secondary Account</h3>
-            <button onClick={() => setShowLinkAccountModal(false)} className="text-gray-400 hover:text-gray-600">
+            <h3 className="text-lg font-semibold text-gray-900">Add Linked Assignment</h3>
+            <button onClick={() => {
+              setShowLinkAccountModal(false);
+              setLinkDateError('');
+            }} className="text-gray-400 hover:text-gray-600">
               <X className="w-5 h-5" />
             </button>
           </div>
           
           <div className="space-y-6">
-            {/* User Selection */}
+            {/* Select assignee first */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select user to link
+                Select assignee (Primary or Secondary)
               </label>
               <select
                 value={selectedNewUser}
-                onChange={(e) => setSelectedNewUser(e.target.value)}
+                onChange={(e) => {
+                  setSelectedNewUser(e.target.value);
+                  setLinkDateError('');
+                }}
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
                 style={{
                   backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
@@ -2611,13 +3297,29 @@ Which is the same as the practice-wide default. An override must differ from the
                 }}
               >
                 <option value="">Select a user...</option>
-                {availableUsers
-                  .filter(user => !linkedAccounts.some(linked => linked.id === user.id))
-                  .map(user => (
-                    <option key={user.id} value={user.id}>
-                      {user.name} - {user.role}
-                    </option>
-                  ))}
+                {availableUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} - {user.role} ({user.type === 'primary' ? 'Primary' : 'Secondary'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Then choose assignment type */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Assignment type
+              </label>
+              <select
+                value={newLinkAssignmentType}
+                onChange={(e) => {
+                  setNewLinkAssignmentType(e.target.value);
+                  setLinkDateError('');
+                }}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
+              >
+                <option value="assistant">Acts as MA / Assistant</option>
+                <option value="coverage">Doctor Coverage</option>
               </select>
             </div>
 
@@ -2625,55 +3327,40 @@ Which is the same as the practice-wide default. An override must differ from the
               <div className="border border-gray-200 rounded-lg p-4">
                 <div className="mb-4">
                   <p className="font-semibold text-gray-900">{selectedUserData.name}</p>
-                  <p className="text-sm text-gray-600">{selectedUserData.role} • {selectedUserData.email}</p>
+                  <p className="text-sm text-gray-600">
+                    {selectedUserData.role} • {selectedUserData.email} • {selectedUserData.type === 'primary' ? 'Primary' : 'Secondary'}
+                  </p>
                 </div>
 
-                {/* Time Range Selection */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Start Date
-                    </label>
-                    <input
-                      type="date"
-                      value={linkStartDate}
-                      onChange={(e) => setLinkStartDate(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      End Date
-                    </label>
-                    <input
-                      type="date"
-                      value={linkEndDate}
-                      onChange={(e) => setLinkEndDate(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
+              </div>
+            )}
+            {linkDateError && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {linkDateError}
               </div>
             )}
           </div>
           
           <div className="flex gap-3 justify-end mt-6">
             <button
-              onClick={() => setShowLinkAccountModal(false)}
+              onClick={() => {
+                setShowLinkAccountModal(false);
+                setLinkDateError('');
+              }}
               className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleLinkAccount}
-              disabled={!selectedUserData || !linkStartDate || !linkEndDate}
+              disabled={!selectedUserData}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                selectedUserData && linkStartDate && linkEndDate
+                selectedUserData
                   ? 'bg-blue-600 text-white hover:bg-blue-700'
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
             >
-              Link Account
+              Save Assignment
             </button>
           </div>
         </div>
@@ -2688,8 +3375,12 @@ Which is the same as the practice-wide default. An override must differ from the
 
     // Ops inheritance: for PM default view, Ops can hide/lock settings
     const isPMDefaultView = !isMasterUser() && !showUserOverride;
-    const isPMHiddenByOps = isPMDefaultView && !canPMSeeSetting(setting);
-    const isPMLockedByOps = isPMDefaultView && !canPMEditSetting(setting);
+    const parentSetting = setting.dependency ? getSettingById(setting.dependency) : null;
+    const parentHiddenByOps = isPMDefaultView && parentSetting && !canPMSeeSetting(parentSetting);
+    const parentLockedByOps = isPMDefaultView && parentSetting && !canPMEditSetting(parentSetting);
+
+    const isPMHiddenByOps = isPMDefaultView && (!canPMSeeSetting(setting) || parentHiddenByOps);
+    const isPMLockedByOps = isPMDefaultView && (!canPMEditSetting(setting) || parentLockedByOps);
 
     if (isPMHiddenByOps) return null;
 
@@ -2711,12 +3402,13 @@ Which is the same as the practice-wide default. An override must differ from the
       // Check if default setting is locked-hidden (disable default controls, but not overrides)
       const isDefaultLockedHidden = !isUserOverride && setting.pmLockState === 'locked-hidden';
       const isDefaultLockedByOpsForPM = !isUserOverride && isPMLockedByOps;
-      const isDefaultReadOnly = isDefaultLockedHidden || isDefaultLockedByOpsForPM;
+      const isDefaultReadOnly = isDefaultLockedHidden || isDefaultLockedByOpsForPM || (!isUserOverride && !isEnabled);
 
       const handleChange = (newValue) => {
         // Ops inheritance: PM cannot edit defaults for ops-locked settings
         if (!isUserOverride && isPMLockedByOps) return;
         if (isDefaultLockedHidden) return; // Prevent changes to locked-hidden defaults
+        if (!isUserOverride && !isEnabled) return; // Prevent changes when dependency disabled
 
         if (isUserOverride && targetUserId) {
           // Check if the resulting override would match BOTH default value and lock state
@@ -3034,6 +3726,65 @@ Which is the same as the practice-wide default. An override must differ from the
             if (isUserOverride && targetUserId) {
               setUserSetting(targetUserId, moduleId, setting.id, 'value', newEnabledServices);
             } else {
+              // Edge case handling (Option A): if a service is disabled at practice level, repair any overrides referencing it
+              if (!isChecked && setting.id === 41) {
+                const removedService = service;
+                const nextPracticeEnabledServices = newEnabledServices;
+                const practiceDefaultService = setting.defaultService || nextPracticeEnabledServices[0];
+
+                const impactedUsers = [];
+                const suffix = `-${moduleId}-${setting.id}`;
+                Object.keys(userSettingsOverrides).forEach((key) => {
+                  if (!key.endsWith(suffix)) return;
+                  const userId = key.slice(0, -suffix.length);
+                  const override = userSettingsOverrides[key];
+                  if (!override) return;
+
+                  const user = allUsers.find(u => u.id.toString() === userId);
+                  const userName = user?.name || `User ${userId}`;
+
+                  const hasEnabledOverride = Array.isArray(override.value);
+                  const oldEnabledServices = hasEnabledOverride ? override.value : enabledServices;
+                  const newUserEnabledServices = oldEnabledServices.filter(s => nextPracticeEnabledServices.includes(s));
+                  const repairedEnabledServices = newUserEnabledServices.length > 0 ? newUserEnabledServices : [nextPracticeEnabledServices[0]];
+
+                  const hasDefaultServiceOverride = typeof override.defaultService === 'string' && override.defaultService.length > 0;
+                  const oldDefaultService = hasDefaultServiceOverride ? override.defaultService : (practiceDefaultService || repairedEnabledServices[0]);
+                  const newDefaultService = repairedEnabledServices.includes(oldDefaultService) ? oldDefaultService : repairedEnabledServices[0];
+
+                  const referencesRemovedService =
+                    oldEnabledServices.includes(removedService) || oldDefaultService === removedService;
+                  const enabledServicesChanged = oldEnabledServices.join('|') !== repairedEnabledServices.join('|');
+                  const defaultServiceChanged = oldDefaultService !== newDefaultService;
+
+                  if (!referencesRemovedService && !enabledServicesChanged && !defaultServiceChanged) return;
+
+                  impactedUsers.push({
+                    userId,
+                    userName,
+                    oldEnabledServices,
+                    newEnabledServices: repairedEnabledServices,
+                    oldDefaultService,
+                    newDefaultService,
+                    shouldUpdateEnabledServices: hasEnabledOverride && enabledServicesChanged,
+                    shouldUpdateDefaultService: hasDefaultServiceOverride && defaultServiceChanged
+                  });
+                });
+
+                if (impactedUsers.length > 0) {
+                  setServiceDisableRepairData({
+                    moduleId,
+                    settingId: setting.id,
+                    removedService,
+                    currentPracticeDefaultService: practiceDefaultService,
+                    newEnabledServices: nextPracticeEnabledServices,
+                    impactedUsers
+                  });
+                  setShowServiceDisableRepairModal(true);
+                  return;
+                }
+              }
+
               updateSettingState(moduleId, setting.id, 'default', newEnabledServices);
             }
           };
@@ -3121,11 +3872,6 @@ Which is the same as the practice-wide default. An override must differ from the
           const dropdownOptions = setting.dependency === 41 ? availableOptions : setting.options;
           // Ensure the current value is in the available options for dependent dropdowns
           const needsDefaultUpdate = setting.dependency === 41 && !availableOptions.includes(value) && availableOptions.length > 0;
-
-          // Auto-update to first available option if current value is not in available options
-          if (needsDefaultUpdate && !isDefaultLockedHidden) {
-            handleChange(availableOptions[0]);
-          }
 
           // Check if this is Delete Consults setting and Custom is selected
           const isDeleteConsults = setting.id === 25;
@@ -3351,11 +4097,12 @@ Which is the same as the practice-wide default. An override must differ from the
           {(currentView === 'settings' || showUserOverride) && (
             <div className="flex items-center gap-2 ml-6">
               <label className="text-xs font-medium text-gray-600 mr-2">
-                {isMasterUser() ? 'Ops Lock:' : 'PM Lock:'}
+                {isMasterUser() ? 'Ops Lock:' : 'Doctor Lock:'}
               </label>
               <select
                 value={showUserOverride ? userLockState : (isMasterUser() ? setting.opsLockState : setting.pmLockState)}
                 onChange={(e) => {
+                  if (!showUserOverride && !isEnabled) return;
                   if (showUserOverride && userId) {
                     const newLockState = e.target.value;
 
@@ -3407,11 +4154,49 @@ Which is the same as the practice-wide default. An override must differ from the
                     // Master user updates opsLockState, PM user updates pmLockState
                     if (isPMLockedByOps) return;
                     const lockStateProperty = isMasterUser() ? 'opsLockState' : 'pmLockState';
-                    updateSettingState(moduleId, setting.id, lockStateProperty, e.target.value);
+                    const nextLockState = e.target.value;
+
+                    // If Ops is hiding a setting, warn and remove all doctor overrides for this setting
+                    if (isMasterUser() && lockStateProperty === 'opsLockState' && nextLockState === 'locked-hidden') {
+                      const overridesToRemove = getAllOverrideRecordsForSetting(moduleId, setting.id);
+                      if (overridesToRemove.length > 0) {
+                        setOpsHideOverridesData({
+                          moduleId,
+                          settingId: setting.id,
+                          settingName: setting.name,
+                          oldOpsLockState: setting.opsLockState,
+                          newOpsLockState: nextLockState,
+                          overridesToRemove
+                        });
+                        setShowOpsHideOverridesModal(true);
+                        return;
+                      }
+                    }
+
+                    // If Ops is locking visible, warn about existing overrides (keep vs remove)
+                    if (isMasterUser() && lockStateProperty === 'opsLockState' && nextLockState === 'locked-visible') {
+                      const overridesToRemove = getAllOverrideRecordsForSetting(moduleId, setting.id);
+                      if (overridesToRemove.length > 0) {
+                        setOpsLockVisibleOverridesData({
+                          moduleId,
+                          settingId: setting.id,
+                          settingName: setting.name,
+                          oldOpsLockState: setting.opsLockState,
+                          newOpsLockState: nextLockState,
+                          overridesToRemove
+                        });
+                        setShowOpsLockVisibleOverridesModal(true);
+                        return;
+                      }
+                    }
+
+                    updateSettingState(moduleId, setting.id, lockStateProperty, nextLockState);
                   }
                 }}
-                disabled={isPMLockedByOps}
-                className="px-3 py-1 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500"
+                disabled={isPMLockedByOps || (!showUserOverride && !isEnabled)}
+                className={`px-3 py-1 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500 ${
+                  (!showUserOverride && !isEnabled) ? 'bg-gray-100 cursor-not-allowed opacity-60' : 'bg-white'
+                }`}
               >
                 <option value="unlocked">Unlocked</option>
                 <option value="locked-visible">Locked (Visible)</option>
@@ -3652,6 +4437,139 @@ Which is the same as the practice-wide default. An override must differ from the
   const SettingsView = () => (
     <div className="flex-1 p-8 bg-gray-50 min-h-screen">
       <div className="max-w-4xl mx-auto">
+        {showServiceRepairBanner && pendingServiceRepairData && (
+          <div className="mb-6 bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Service overrides need repair</p>
+                <p className="text-sm text-amber-800 mt-1">
+                  Some users have Service Settings overrides that no longer match the enabled services. Apply repairs to keep defaults/overrides valid.
+                </p>
+                <p className="text-xs text-amber-800 mt-2">
+                  Impacted users: <span className="font-semibold">{pendingServiceRepairData.impactedUsers.length}</span>
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setShowServiceRepairBanner(false);
+                    setPendingServiceRepairData(null);
+                  }}
+                  className="px-3 py-2 text-amber-800 bg-white border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors text-sm font-medium"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => {
+                    if (!pendingServiceRepairData) return;
+
+                    pendingServiceRepairData.impactedUsers.forEach((u) => {
+                      if (u.shouldUpdateEnabledServices) {
+                        setUserSetting(u.userId, pendingServiceRepairData.moduleId, pendingServiceRepairData.settingId, 'value', u.newEnabledServices);
+                      }
+                      if (u.shouldUpdateDefaultService) {
+                        setUserSetting(u.userId, pendingServiceRepairData.moduleId, pendingServiceRepairData.settingId, 'defaultService', u.newDefaultService);
+                      }
+                    });
+
+                    if (pendingServiceRepairData.practiceDefaultServiceRepairNeeded) {
+                      updateSettingState(
+                        pendingServiceRepairData.moduleId,
+                        pendingServiceRepairData.settingId,
+                        'defaultService',
+                        pendingServiceRepairData.practiceEnabledServices[0]
+                      );
+                    }
+
+                    setShowServiceRepairBanner(false);
+                    setPendingServiceRepairData(null);
+                    setCrossTabToast('Repaired Service Settings overrides.');
+                  }}
+                  className="px-3 py-2 text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium"
+                >
+                  Apply repairs
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCrossTabOverridesBanner && pendingCrossTabOverrides && (
+          <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-400 p-4 rounded">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-emerald-900">Override updates available</p>
+                <p className="text-sm text-emerald-800 mt-1">
+                  User overrides were updated in another tab. Apply updates now to stay in sync.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setShowCrossTabOverridesBanner(false);
+                    setPendingCrossTabOverrides(null);
+                  }}
+                  className="px-3 py-2 text-emerald-800 bg-white border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-colors text-sm font-medium"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => {
+                    setUserSettingsOverrides(pendingCrossTabOverrides);
+                    setShowCrossTabOverridesBanner(false);
+                    setPendingCrossTabOverrides(null);
+                    setCrossTabToast('Applied override updates from another tab.');
+                  }}
+                  className="px-3 py-2 text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
+                >
+                  Apply overrides
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCrossTabUpdateBanner && pendingCrossTabModuleSettings && (
+          <div className="mb-6 bg-indigo-50 border-l-4 border-indigo-400 p-4 rounded">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-indigo-900">Updates available</p>
+                <p className="text-sm text-indigo-800 mt-1">
+                  Settings were updated in another tab. Apply updates now to stay in sync.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setShowCrossTabUpdateBanner(false);
+                    setPendingCrossTabModuleSettings(null);
+                  }}
+                  className="px-3 py-2 text-indigo-700 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors text-sm font-medium"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => {
+                    setModuleSettings(pendingCrossTabModuleSettings);
+                    setShowCrossTabUpdateBanner(false);
+                    setPendingCrossTabModuleSettings(null);
+                    setCrossTabToast('Applied updates from another tab.');
+                  }}
+                  className="px-3 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+                >
+                  Apply updates
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {crossTabToast && (
+          <div className="mb-6 bg-gray-900 text-white px-4 py-3 rounded-lg shadow">
+            <p className="text-sm">{crossTabToast}</p>
+          </div>
+        )}
+
         <div className="mb-8">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -4184,7 +5102,7 @@ Which is the same as the practice-wide default. An override must differ from the
               >
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4" />
-                  Link Secondary Account
+                  Linked Assignments
                 </div>
               </button>
             )}
@@ -4309,29 +5227,21 @@ Which is the same as the practice-wide default. An override must differ from the
                   <h3 className="text-xl font-semibold text-gray-900 mb-6">Linked to Doctors</h3>
 
                   {linkedAccounts
-                    .filter(account => account.id === selectedUser.id)
-                    .sort((a, b) => new Date(a.startDate) - new Date(b.startDate))
+                    .filter(account => getAssignmentAssigneeId(account) === String(selectedUser.id))
                     .length > 0 ? (
                     <div className="space-y-4">
                       {linkedAccounts
-                        .filter(account => account.id === selectedUser.id)
-                        .sort((a, b) => new Date(a.startDate) - new Date(b.startDate))
+                        .filter(account => getAssignmentAssigneeId(account) === String(selectedUser.id))
                         .map((link, index) => (
                           <div key={index} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
                             <div className="flex items-start justify-between">
                               <div>
                                 <p className="font-semibold text-gray-900 text-lg">{link.linkedToDoctorName}</p>
-                                <div className="mt-2 space-y-1">
-                                  <p className="text-sm text-gray-600">
-                                    <span className="font-medium">Start Date:</span> {new Date(link.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    <span className="font-medium">End Date:</span> {new Date(link.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="text-xs text-gray-500 bg-blue-100 px-3 py-1 rounded-full">
-                                {Math.ceil((new Date(link.endDate) - new Date(link.startDate)) / (1000 * 60 * 60 * 24))} days
+                                <p className="text-xs text-blue-700 mt-1">
+                                  {getAssignmentType(link) === 'coverage' ? 'Coverage Assignment' : 'Assistant Assignment'}
+                                  {' • '}
+                                  {getAssignmentAssigneeType(link) === 'primary' ? 'Primary Assignee' : 'Secondary Assignee'}
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -4386,48 +5296,21 @@ Which is the same as the practice-wide default. An override must differ from the
 
             {selectedUserView === 'link-secondary' && (
               <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
-                <h3 className="text-xl font-semibold text-gray-900 mb-6">Link Secondary Account</h3>
+                <h3 className="text-xl font-semibold text-gray-900 mb-6">Linked Assignments</h3>
                 
                 <div className="space-y-6">
                   <div className="border-l-4 border-blue-400 bg-blue-50 p-6 rounded-lg">
-                    <h4 className="text-lg font-semibold text-blue-800 mb-3">Connect Secondary User</h4>
+                    <h4 className="text-lg font-semibold text-blue-800 mb-3">Assign Coverage or Assistant</h4>
                     <p className="text-sm text-blue-700 mb-4">
-                      Link a secondary account (nurse, assistant, etc.) to this primary doctor account. This allows shared access to notes and consultations.
+                      Link a primary or secondary user to this doctor for temporary coverage or assistant support.
                     </p>
                     
                     <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Select user to link
-                        </label>
-                        <select
-                          className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
-                          style={{
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                            backgroundRepeat: 'no-repeat',
-                            backgroundPosition: 'right 16px center',
-                            paddingRight: '48px'
-                          }}
-                        >
-                          <option value="">Select a user...</option>
-                          <option value="nurse1">Lisa Parker, RN - Cardiology Nurse</option>
-                          <option value="nurse2">Michael Torres, RN - ICU Nurse</option>
-                          <option value="nurse3">Sarah Kim, RN - Pediatric Nurse</option>
-                          <option value="assistant1">Jennifer Walsh - Medical Assistant</option>
-                          <option value="assistant2">David Chen - Clinical Assistant</option>
-                          <option value="assistant3">Maria Rodriguez - Administrative Assistant</option>
-                          <option value="pa1">Dr. Amanda Foster, PA-C - Physician Assistant</option>
-                          <option value="np1">Dr. Robert Taylor, NP - Nurse Practitioner</option>
-                          <option value="tech1">Alex Johnson - Medical Technician</option>
-                          <option value="tech2">Emily Brown - Lab Technician</option>
-                        </select>
-                      </div>
-                      
                       <button 
                         onClick={() => setShowLinkAccountModal(true)}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                       >
-                        Link Account
+                        Add Assignment
                       </button>
                     </div>
                   </div>
@@ -4435,46 +5318,28 @@ Which is the same as the practice-wide default. An override must differ from the
                   <div className="border border-gray-200 rounded-lg p-6">
                     <h5 className="font-medium text-gray-900 mb-4">Currently Linked Accounts</h5>
                     <div className="space-y-6">
-                      {linkedAccounts.map((account) => (
-                        <div key={account.id} className="border border-gray-200 rounded-lg p-4">
+                      {linkedAccounts
+                        .filter((account) => account.linkedToDoctorId === selectedUser.id)
+                        .map((account) => (
+                        <div key={account.linkId || account.id} className="border border-gray-200 rounded-lg p-4">
                           <div className="flex items-center justify-between mb-4">
                             <div>
                               <p className="font-semibold text-gray-900">{account.name}</p>
                               <p className="text-sm text-gray-600">{account.role} • {account.email}</p>
+                              <p className="text-xs text-blue-700 mt-1">
+                                {getAssignmentType(account) === 'coverage' ? 'Coverage Assignment' : 'Assistant Assignment'}
+                                {' • '}
+                                {getAssignmentAssigneeType(account) === 'primary' ? 'Primary Assignee' : 'Secondary Assignee'}
+                              </p>
                             </div>
                             <button 
-                              onClick={() => setLinkedAccounts(prev => prev.filter(acc => acc.id !== account.id))}
+                              onClick={() => setLinkedAccounts(prev => prev.filter(acc => (acc.linkId || acc.id) !== (account.linkId || account.id)))}
                               className="text-red-600 hover:text-red-800 text-sm font-medium"
                             >
                               Unlink
                             </button>
                           </div>
 
-                          {/* Link Date Range */}
-                          <div className="bg-gray-50 rounded-lg p-4">
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-gray-700">Start Date:</span>
-                                <span className="text-sm text-gray-900">
-                                  {new Date(account.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-gray-700">End Date:</span>
-                                <span className="text-sm text-gray-900">
-                                  {new Date(account.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                </span>
-                              </div>
-                              <div className="pt-2 mt-2 border-t border-gray-200">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm font-medium text-gray-700">Duration:</span>
-                                  <span className="text-sm text-blue-700 font-medium">
-                                    {Math.ceil((new Date(account.endDate) - new Date(account.startDate)) / (1000 * 60 * 60 * 24))} days
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
                         </div>
                       ))}
                     </div>
@@ -4499,27 +5364,34 @@ Which is the same as the practice-wide default. An override must differ from the
               <Shield className="w-6 h-6 text-blue-600" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Practice Management Dashboard</h1>
+              <h1 className="text-xl font-semibold text-gray-900">
+                {practiceName ? `${practiceName} — Practice Management Dashboard` : 'Practice Management Dashboard'}
+              </h1>
               <p className="text-sm text-gray-600">Configure settings and manage user access</p>
             </div>
           </div>
 
-          {/* User Role Switcher */}
           <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-gray-700">Logged in as:</label>
-            <select
-              value={currentUserEmail}
-              onChange={(e) => setCurrentUserEmail(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <div className="text-right">
+              <div className="text-sm font-medium text-gray-900">
+                {currentUserEmail}
+                {isMasterUser() && (
+                  <span className="ml-2 px-2.5 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full align-middle">
+                    OPS
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-gray-600">
+                Practice: <span className="font-medium text-gray-800">{practiceName || practiceId || '—'}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="pm@practice.com">PM (Practice Manager)</option>
-              <option value="ops@marvix.com">Ops (Master User)</option>
-            </select>
-            {isMasterUser() && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
-                MASTER
-              </span>
-            )}
+              Logout
+            </button>
           </div>
         </div>
       </header>
@@ -4545,6 +5417,9 @@ Which is the same as the practice-wide default. An override must differ from the
       <AddSecondaryAccountModal />
       <OverrideConfirmModal />
       <OverrideCleanupModal />
+      <OpsHideOverridesModal />
+      <OpsLockVisibleOverridesModal />
+      <ServiceDisableRepairModal />
       <GoogleSignoutConfirmModal />
       <AddOverrideModal />
     </div>
