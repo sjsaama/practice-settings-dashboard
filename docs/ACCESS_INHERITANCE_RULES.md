@@ -5,8 +5,8 @@ This document defines the **behavioral rules** for settings access, lock states,
 ## Concepts
 
 ### Roles
-- **Ops (Master user)**: logs into this dashboard as `ops@marvix.com`
-- **PM (Practice Manager)**: logs into this dashboard as any other email
+- **Ops (Master user)**: selected explicitly in auth flow (`Ops` tab), then validated against `opsPracticeAccess`
+- **PM (Practice Manager)**: selected explicitly in auth flow (`PM` tab), then validated against `pmPracticeBinding`
 - **Doctors (end users)**: do **not** log into this dashboard; they inherit settings downstream
 
 ### Per-setting fields
@@ -44,6 +44,7 @@ These rules apply to **PM behavior only**. Ops is not restricted by `opsLockStat
 ### `opsLockState = locked-hidden`
 - **PM**: does not see the setting at all (fully invisible)
 - **Ops**: can still see and edit the setting
+- **Override cleanup**: when Ops changes a setting from `opsLockState: unlocked` → `locked-hidden`, the system warns and removes all existing doctor overrides for that setting (so there are no hidden-but-still-effective overrides).
 
 ### `opsLockState = locked-visible`
 - **PM**: sees the setting but is **read-only**
@@ -84,7 +85,39 @@ Standard settings:
 
 Ops (Master) can use the same doctor override system, but **only** when the setting is `opsLockState = unlocked` (same constraint as PM for simplicity).
 
+## Authentication and session model (implemented)
+
+- Sign-in uses email + password + MFA.
+- Demo password is currently `marvix`.
+- After MFA:
+  - PM is auto-bound to exactly one practice via `pmPracticeBinding`.
+  - Ops is assigned practices from `opsPracticeAccess`; if multiple are available, Ops selects one.
+- If Ops is active for a practice, PM can still access the dashboard but is restricted to read-only mode until Ops session ends.
+- Session is stored in local storage key `practiceSettingsDashboard.authSession` with:
+  - `email`
+  - `role` (`pm` or `ops`)
+  - `practiceId`
+  - `practiceName`
+  - `authenticatedAt`
+
+## Linked assignments (prototype)
+
+- PM/Ops can create linked assignments from a primary doctor to:
+  - a secondary user, or
+  - another primary doctor.
+- Supported assignment types:
+  - `assistant`
+  - `coverage`
+- Conflict prevention is scoped to duplicate tuple detection:
+  - same assignee + same doctor + same assignment type is blocked.
+
 ## Persistence (current behavior)
-- Practice settings state (including `opsLockState`) is persisted locally so Ops changes apply across sessions/tabs.
-- Doctor overrides are currently in-memory only unless explicitly persisted.
+- Practice settings are persisted per practice:
+  - `practiceSettingsDashboard.moduleSettings.<practiceId>`
+- Doctor overrides are persisted per practice:
+  - `practiceSettingsDashboard.userSettingsOverrides.<practiceId>`
+- Linked assignments are persisted per practice:
+  - `practiceSettingsDashboard.linkedAccounts.<practiceId>`
+- Auth session is persisted separately:
+  - `practiceSettingsDashboard.authSession`
 

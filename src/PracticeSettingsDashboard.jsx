@@ -1,13 +1,32 @@
-/* eslint-disable react-hooks/rules-of-hooks */
-import React, { useCallback, useState, useEffect } from 'react';
-import { Settings, Users, ChevronRight, Search, Shield, X, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings, Users, ChevronRight, Search, Shield, RotateCcw } from 'lucide-react';
 import BlockedAccessScreen from './components/layout/BlockedAccessScreen';
+import {
+  EmailAttestationModal,
+  SuspendAccountModal,
+  ResetPinModal,
+  GoogleSignoutConfirmModal
+} from './components/dashboard/CommonModals';
+import {
+  HipaaEmailConfirmModal,
+  OverrideConfirmModal,
+  OverrideCleanupModal,
+  OpsHideOverridesModal,
+  OpsLockVisibleOverridesModal,
+} from './components/dashboard/AdvancedModals';
+import UserTypeModal from './components/dashboard/UserTypeModal';
+import LinkedAssignmentModal from './components/dashboard/LinkedAssignmentModal';
+import { AddPrimaryAccountModal, AddSecondaryAccountModal } from './components/dashboard/AccountModals';
+import AddOverrideModal from './components/dashboard/AddOverrideModal';
+import SettingRow from './components/dashboard/SettingRow';
+import { settingsModules as initialSettingsModules } from './data/settingsData';
+import { initialLinkedAssignments, initialUsers } from './data/initialData';
 import {
   canLoginAsMasterUser,
   canPMAccess,
   onMasterUserSessionChange
 } from './utils/masterUserSession';
-import { canPMEditSetting, canPMSeeSetting, getOpsLockLabel } from './utils/accessPolicy';
+import { canPMEditSetting } from './utils/accessPolicy';
 import {
   getModuleSettingsStorageKey,
   loadModuleSettingsFromStorage,
@@ -22,35 +41,20 @@ import {
   loadLinkedAccountsFromStorage,
   saveLinkedAccountsToStorage,
 } from './utils/linkedAccountsStorage';
-
-// Helper function to generate time options based on timezone
-const getTimeOptionsForTimezone = (timezone) => {
-  // Timezone offset from Eastern (base is Eastern Time)
-  const timezoneOffsets = {
-    'Eastern (America/New York)': 0,
-    'Central (America/Chicago)': -1,
-    'Mountain (America/Denver)': -2,
-    'Pacific (America/Los Angeles)': -3
-  };
-
-  const offset = timezoneOffsets[timezone] || 0;
-  const baseHours = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17];
-
-  return baseHours.map(hour => {
-    let adjustedHour = hour + offset;
-
-    // Handle negative hours (wrap to previous day, but keep in 24h range)
-    if (adjustedHour < 0) adjustedHour += 24;
-    if (adjustedHour >= 24) adjustedHour -= 24;
-
-    const hourPart = Math.floor(adjustedHour);
-    const minutePart = (adjustedHour % 1) === 0.5 ? '30' : '00';
-    const period = hourPart >= 12 ? 'PM' : 'AM';
-    const displayHour = hourPart === 0 ? 12 : hourPart > 12 ? hourPart - 12 : hourPart;
-
-    return `${displayHour}:${minutePart} ${period}`;
-  });
-};
+import {
+  getAssignmentAssigneeId,
+  getAssignmentType,
+  getAssignmentAssigneeType,
+  isDuplicateAssignment,
+  buildLinkedAssignmentCandidates,
+  createLinkedAssignmentRecord,
+} from './utils/linkedAssignments';
+import {
+  valuesAreEqual,
+  getMatchingOverrideAlertMessage
+} from './utils/validationHelpers';
+import { normalizeDependentSettings } from './utils/settingsNormalization';
+import { seededLinkedAssignmentCandidates } from './data/linkedAssignmentCandidates';
 
 const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLogout }) => {
   // Auth (provided by App)
@@ -64,6 +68,8 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [activeUser, setActiveUser] = useState('');
+  const [isPMReadOnly, setIsPMReadOnly] = useState(false);
+  const [activeOpsUser, setActiveOpsUser] = useState('');
 
   // ==================== ALL STATE DECLARATIONS (MUST BE BEFORE ANY CONDITIONAL RETURNS) ====================
   const [currentView, setCurrentView] = useState('settings');
@@ -97,9 +103,6 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   const [hipaaAttestationUser, setHipaaAttestationUser] = useState(null);
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [showGoogleSignoutModal, setShowGoogleSignoutModal] = useState(false);
-  const [customDeleteDays, setCustomDeleteDays] = useState('');
-  const [futureDays, setFutureDays] = useState(1); // Days for Future appointments
-  const [pastDays, setPastDays] = useState(1); // Days for Past appointments
   const [newUserPermissions, setNewUserPermissions] = useState({
     createConsults: true,
     mergeAndLinkAppointments: false,
@@ -114,19 +117,15 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   });
   const [showOverrideCleanupModal, setShowOverrideCleanupModal] = useState(false);
   const [overrideCleanupData, setOverrideCleanupData] = useState(null);
-  const [showOpsHideOverridesModal, setShowOpsHideOverridesModal] = useState(false);
-  const [opsHideOverridesData, setOpsHideOverridesData] = useState(null);
-  const [showOpsLockVisibleOverridesModal, setShowOpsLockVisibleOverridesModal] = useState(false);
-  const [opsLockVisibleOverridesData, setOpsLockVisibleOverridesData] = useState(null);
-  const [showServiceDisableRepairModal, setShowServiceDisableRepairModal] = useState(false);
-  const [serviceDisableRepairData, setServiceDisableRepairData] = useState(null);
-  const [showServiceRepairBanner, setShowServiceRepairBanner] = useState(false);
-  const [pendingServiceRepairData, setPendingServiceRepairData] = useState(null);
   const [showCrossTabUpdateBanner, setShowCrossTabUpdateBanner] = useState(false);
   const [pendingCrossTabModuleSettings, setPendingCrossTabModuleSettings] = useState(null);
   const [showCrossTabOverridesBanner, setShowCrossTabOverridesBanner] = useState(false);
   const [pendingCrossTabOverrides, setPendingCrossTabOverrides] = useState(null);
   const [crossTabToast, setCrossTabToast] = useState(null);
+  const [showOpsHideOverridesModal, setShowOpsHideOverridesModal] = useState(false);
+  const [opsHideOverridesData, setOpsHideOverridesData] = useState(null);
+  const [showOpsLockVisibleOverridesModal, setShowOpsLockVisibleOverridesModal] = useState(false);
+  const [opsLockVisibleOverridesData, setOpsLockVisibleOverridesData] = useState(null);
   const [userSettingsOverrides, setUserSettingsOverrides] = useState(() => {
     const saved = loadUserSettingsOverridesFromStorage(practiceId);
     return saved || {};
@@ -135,68 +134,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     const saved = loadLinkedAccountsFromStorage(practiceId);
     if (saved) return saved;
 
-    // Seed demo data for first run only.
-    return [
-      {
-        linkId: 'link_lisa_seed',
-        assigneeUserId: 'lisa_parker',
-        assigneeType: 'secondary',
-        assignmentType: 'assistant',
-        secondaryUserId: 'lisa_parker',
-        id: 'lisa_parker',
-        name: 'Lisa Parker, RN',
-        role: 'Cardiology Nurse',
-        email: 'lisa.parker@clinic.com',
-        permissions: {
-          createConsults: true,
-          mergeAndLinkAppointments: false,
-          canGenerateNotes: false,
-          editGeneratedNotes: false,
-          pushToEHR: false
-        },
-        linkedToDoctorId: 1,
-        linkedToDoctorName: 'Dr. Sarah Johnson',
-        startDate: '2026-03-01',
-        endDate: '2026-03-31'
-      },
-      {
-        linkId: 'link_jennifer_seed',
-        assigneeUserId: 'jennifer_walsh',
-        assigneeType: 'secondary',
-        assignmentType: 'assistant',
-        secondaryUserId: 'jennifer_walsh',
-        id: 'jennifer_walsh',
-        name: 'Jennifer Walsh',
-        role: 'Medical Assistant',
-        email: 'jennifer.walsh@clinic.com',
-        permissions: {
-          createConsults: true,
-          mergeAndLinkAppointments: false,
-          canGenerateNotes: true,
-          editGeneratedNotes: true,
-          pushToEHR: false
-        },
-        linkedToDoctorId: 2,
-        linkedToDoctorName: 'Dr. Michael Chen',
-        startDate: '2026-03-05',
-        endDate: '2026-04-05'
-      }
-    ];
+    // Clone seeded data to keep module constants immutable.
+    return initialLinkedAssignments.map((assignment) => ({ ...assignment }));
   });
-  const [allUsers, setAllUsers] = useState([
-    { id: 1, name: 'Dr. Sarah Johnson', type: 'primary', specialty: 'Cardiology', email: 'sarah.johnson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 2, name: 'Dr. Michael Chen', type: 'primary', specialty: 'Neurology', email: 'michael.chen@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 3, name: 'Dr. Emily Rodriguez', type: 'primary', specialty: 'Pediatrics', email: 'emily.rodriguez@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 4, name: 'Dr. James Wilson', type: 'primary', specialty: 'Orthopedics', email: 'james.wilson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 5, name: 'Dr. Lisa Thompson', type: 'primary', specialty: 'Dermatology', email: 'lisa.thompson@clinic.com', permissions: { createConsults: true, canGenerateNotes: true, editGeneratedNotes: true, pushToEHR: true } },
-    { id: 'sec1', name: 'Lisa Parker', type: 'secondary', role: 'Nurse', email: 'lisa.parker@clinic.com', permissions: { createConsults: true, mergeAndLinkAppointments: false, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } },
-    { id: 'sec2', name: 'Alex Johnson', type: 'secondary', role: 'Lab Technician', email: 'alex.johnson@clinic.com', permissions: { createConsults: true, mergeAndLinkAppointments: false, canGenerateNotes: false, editGeneratedNotes: false, pushToEHR: false } }
-  ]);
+  const [allUsers, setAllUsers] = useState(() => initialUsers.map((user) => ({ ...user })));
 
-  const getAssignmentAssigneeId = (assignment) =>
-    String(assignment?.assigneeUserId ?? assignment?.secondaryUserId ?? assignment?.id ?? '');
-  const getAssignmentType = (assignment) => assignment?.assignmentType || 'assistant';
-  const getAssignmentAssigneeType = (assignment) => assignment?.assigneeType || 'secondary';
   const [showAddSecondaryAccountModal, setShowAddSecondaryAccountModal] = useState(false);
   const [newSecondaryAccount, setNewSecondaryAccount] = useState({
     name: '',
@@ -212,342 +154,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   });
 
   // Initialize moduleSettings with lazy initializer
-  // settingsModules is defined later in the component, so we use a function to defer evaluation
   const [moduleSettings, setModuleSettings] = useState(() => {
     const saved = loadModuleSettingsFromStorage(practiceId);
     if (saved) return saved;
-
-    // Settings data structure - Complete with all settings
-    const settingsModules = {
-      'note-settings': {
-        name: 'Note Settings',
-        subtitle: 'Settings that affect your notes and other documents',
-        settings: [
-          {
-            id: 1,
-            name: 'Default Patient Pronoun',
-            type: 'dropdown',
-            options: ['He', 'She', 'They'],
-            default: 'They',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: ''
-          },
-          {
-            id: 2,
-            name: 'Patient Name',
-            type: 'dropdown',
-            options: ['As Entered', 'Infer from Audio', '"The Patient"'],
-            default: 'As Entered',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'As Entered': 'AI will use the entered patient name',
-              'Infer from Audio': 'AI will infer the patient name from the audio',
-              '"The Patient"': 'AI will refer to the patient as "The patient"'
-            }
-          },
-          {
-            id: 3,
-            name: 'Default Visit Type',
-            type: 'dropdown',
-            options: ['First Visit', 'Follow up'],
-            default: 'Follow up',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: ''
-          },
-          {
-            id: 4,
-            name: 'Default Note View',
-            type: 'dropdown',
-            options: ['Section View', 'Full Note View'],
-            default: 'Full Note View',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'Section View': 'By default, notes will open in Section View, each section in its own text box',
-              'Full Note View': 'By default, notes will open in Full Note View, everything in a single text box'
-            }
-          },
-          {
-            id: 5,
-            name: 'Capture Dictation Separately',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'False',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'True': 'A new section "Verbatim Dictation" will be inserted in the note',
-              'False': 'Enable to insert a new section "Verbatim Dictation" to capture all dictation'
-            }
-          },
-          {
-            id: 6,
-            name: 'Skip empty sections in Note',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'True',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'True': '',
-              'False': 'Enable to hide empty sections in your notes'
-            }
-          }
-        ]
-      },
-      'controls': {
-        name: 'Controls',
-        subtitle: 'Settings that affect app behaviour',
-        settings: [
-          {
-            id: 20,
-            name: 'Timezone',
-            type: 'dropdown',
-            options: [
-              'Eastern (America/New York)',
-              'Central (America/Chicago)',
-              'Mountain (America/Denver)',
-              'Pacific (America/Los Angeles)'
-            ],
-            default: 'Eastern (America/New York)',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: '',
-            required: true
-          },
-          {
-            id: 21,
-            name: '2-factor Authentication',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'False',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'True': 'You will receive an OTP on email for every login in addition to your access code',
-              'False': 'Enable to receive an OTP on email for every login in addition to your access code'
-            }
-          },
-          {
-            id: 22,
-            name: 'Send Note on Email',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'False',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'True': '',
-              'False': 'Enable only if your email complies with Privacy and Data Protection laws'
-            },
-            requiresAttestation: true
-          },
-          {
-            id: 23,
-            name: 'Send Transcript in Email',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'False',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: '',
-            dependency: 22
-          },
-          {
-            id: 24,
-            name: 'Play Recording Consent Disclaimer',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'False',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'True': 'Recording consent disclaimer will play every time a new consult is started',
-              'False': 'Enable to play a recording consent disclaimer before every consult'
-            }
-          },
-          {
-            id: 25,
-            name: 'Delete Consults',
-            type: 'dropdown',
-            options: [
-              '1 day', '2 days', '3 days', '4 days', '5 days', '6 days',
-              '1 week', '2 weeks', '3 weeks',
-              '1 month', '2 months', '3 months', '4 months',
-              'Custom',
-              'Never'
-            ],
-            default: '1 month',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: ''
-          }
-        ]
-      },
-      'em-settings': {
-        name: 'E/M Settings',
-        subtitle: 'Settings that affect E/M codes',
-        settings: [
-          {
-            id: 41,
-            name: 'Service Settings',
-            type: 'service-settings-combined',
-            options: ['Outpatient', 'Inpatient', 'Emergency Services', 'Home Services', 'Nursing Facilities'],
-            default: ['Outpatient'],
-            defaultService: 'Outpatient',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Configure which service settings are available and set the default.'
-          },
-          {
-            id: 43,
-            name: 'Enable Preventive Medicine Service',
-            type: 'toggle',
-            options: ['True', 'False'],
-            default: 'False',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtexts: {
-              'True': '',
-              'False': 'Enable to see Preventive Visit (eg. Annual check up) as a consult option for E/M codes'
-            }
-          }
-        ]
-      },
-      'ehr-settings-amd': {
-        name: 'EHR Settings - AMD',
-        subtitle: 'Settings that control AMD EHR integration and synchronization',
-        settings: [
-          {
-            id: 73,
-            name: 'Daily appointment sync time',
-            type: 'time-multiselect',
-            options: [
-              '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-              '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
-              '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
-              '5:00 PM'
-            ],
-            default: [],
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-          },
-          {
-            id: 76,
-            name: 'Allow repeat note push',
-            type: 'toggle',
-            options: ['Yes', 'No'],
-            default: 'Off',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Allow pushing updated notes to EHR more than once'
-          },
-          {
-            id: 77,
-            name: 'Push to EHR automatically',
-            type: 'toggle',
-            options: ['On', 'Off'],
-            default: 'Off',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Automatically push completed notes to EHR system'
-          }
-        ]
-      },
-      'ehr-settings-athena': {
-        name: 'EHR Settings - Athena',
-        subtitle: 'Settings that control Athena EHR integration and synchronization',
-        settings: [
-          {
-            id: 83,
-            name: 'Daily appointment sync time',
-            type: 'time-multiselect',
-            options: [
-              '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-              '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
-              '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
-              '5:00 PM'
-            ],
-            default: [],
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
-          },
-          {
-            id: 86,
-            name: 'Allow repeat note push',
-            type: 'toggle',
-            options: ['Yes', 'No'],
-            default: 'Off',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Allow pushing updated notes to EHR more than once'
-          },
-          {
-            id: 87,
-            name: 'Push to EHR automatically',
-            type: 'toggle',
-            options: ['On', 'Off'],
-            default: 'Off',
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Automatically push completed notes to EHR system'
-          },
-          {
-            id: 88,
-            name: 'Document Types to Pull From EHR',
-            type: 'multiselect',
-            options: [
-              'Lab Reports',
-              'Discharge Summary',
-              'Radiology Reports',
-              'Pathology Reports',
-              'Consultation Notes',
-              'Operative Reports',
-              'Progress Notes',
-              'Medication Lists',
-              'Immunization Records',
-              'Imaging Studies'
-            ],
-            default: ['Lab Reports', 'Discharge Summary', 'Radiology Reports'],
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Select which document types should be automatically pulled from the EHR'
-          }
-        ]
-      },
-      'teleconsult-settings': {
-        name: 'Teleconsult Settings',
-        subtitle: 'Configure your teleconsult integrations',
-        settings: [
-          {
-            id: 71,
-            name: 'Google Calendar',
-            type: 'google-signin',
-            options: [],
-            default: false,
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'This option is only visible to users who have signed up for "Google Calendar" as EHR.'
-          },
-          {
-            id: 72,
-            name: 'Zoom',
-            type: 'zoom-check',
-            options: [],
-            default: false,
-            opsLockState: 'unlocked',
-            pmLockState: 'unlocked',
-            subtext: 'Connect Marvix app via Zoom marketplace. Consults via Zoom are not linked to an appointment - new consult is created.'
-          }
-        ]
-      }
-    };
-    return settingsModules;
+    // Clone seeded module config so in-component updates don't mutate shared constants.
+    return JSON.parse(JSON.stringify(initialSettingsModules));
   });
 
   // Persist module settings so Ops changes apply to PM sessions/tabs
@@ -565,151 +176,13 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     saveLinkedAccountsToStorage(linkedAccounts, practiceId);
   }, [linkedAccounts, practiceId]);
 
-  const computeServiceSettingsRepairs = useCallback(() => {
-    // Service Settings: moduleId is 'em-settings', settingId is 41
-    const moduleId = 'em-settings';
-    const settingId = 41;
-    const serviceSetting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
-    if (!serviceSetting) return null;
-
-    const practiceEnabled = Array.isArray(serviceSetting.default) ? serviceSetting.default : [];
-    if (practiceEnabled.length === 0) return null;
-
-    const practiceDefaultService = serviceSetting.defaultService || practiceEnabled[0];
-
-    const impactedUsers = [];
-    const suffix = `-${moduleId}-${settingId}`;
-    Object.keys(userSettingsOverrides).forEach((key) => {
-      if (!key.endsWith(suffix)) return;
-      const userId = key.slice(0, -suffix.length);
-      const override = userSettingsOverrides[key];
-      if (!override) return;
-
-      const user = allUsers.find(u => u.id.toString() === userId);
-      const userName = user?.name || `User ${userId}`;
-
-      const hasEnabledOverride = Array.isArray(override.value);
-      const oldEnabledServices = hasEnabledOverride ? override.value : practiceEnabled;
-
-      // Enforce that user-enabled services cannot include disabled practice services
-      const repairedEnabledServicesCandidate = oldEnabledServices.filter(s => practiceEnabled.includes(s));
-      const repairedEnabledServices = repairedEnabledServicesCandidate.length > 0 ? repairedEnabledServicesCandidate : [practiceEnabled[0]];
-
-      const hasDefaultServiceOverride = typeof override.defaultService === 'string' && override.defaultService.length > 0;
-      const oldDefaultService = hasDefaultServiceOverride ? override.defaultService : (practiceDefaultService || repairedEnabledServices[0]);
-      const newDefaultService = repairedEnabledServices.includes(oldDefaultService) ? oldDefaultService : repairedEnabledServices[0];
-
-      const enabledServicesChanged = oldEnabledServices.join('|') !== repairedEnabledServices.join('|');
-      const defaultServiceChanged = oldDefaultService !== newDefaultService;
-
-      if (!enabledServicesChanged && !defaultServiceChanged) return;
-
-      impactedUsers.push({
-        userId,
-        userName,
-        oldEnabledServices,
-        newEnabledServices: repairedEnabledServices,
-        oldDefaultService,
-        newDefaultService,
-        shouldUpdateEnabledServices: hasEnabledOverride && enabledServicesChanged,
-        shouldUpdateDefaultService: hasDefaultServiceOverride && defaultServiceChanged
-      });
-    });
-
-    const practiceDefaultServiceRepairNeeded = !practiceEnabled.includes(practiceDefaultService);
-
-    if (impactedUsers.length === 0 && !practiceDefaultServiceRepairNeeded) return null;
-
-    return {
-      moduleId,
-      settingId,
-      practiceEnabledServices: practiceEnabled,
-      currentPracticeDefaultService: practiceDefaultService,
-      impactedUsers,
-      practiceDefaultServiceRepairNeeded
-    };
-  }, [allUsers, moduleSettings, userSettingsOverrides]);
-
-  // Detect invalid service overrides even if changes didn't come from checkbox UI
-  useEffect(() => {
-    const repairPlan = computeServiceSettingsRepairs();
-    if (!repairPlan) {
-      setShowServiceRepairBanner(false);
-      setPendingServiceRepairData(null);
-      return;
-    }
-
-    // If we're mid-flow, don't pop banners/modals; queue it for later.
-    const isMidFlow =
-      showAddOverrideModal ||
-      showOverrideCleanupModal ||
-      showOverrideConfirmModal ||
-      showOpsHideOverridesModal ||
-      showServiceDisableRepairModal ||
-      showAddSecondaryAccountModal ||
-      showAddPrimaryAccountModal ||
-      showLinkAccountModal ||
-      showSuspendModal ||
-      showResetPinModal;
-
-    if (isMidFlow) {
-      setPendingServiceRepairData(repairPlan);
-      setShowServiceRepairBanner(true);
-      return;
-    }
-
-    setPendingServiceRepairData(repairPlan);
-    setShowServiceRepairBanner(true);
-  }, [
-    computeServiceSettingsRepairs,
-    moduleSettings,
-    userSettingsOverrides,
-    showAddOverrideModal,
-    showOverrideCleanupModal,
-    showOverrideConfirmModal,
-    showOpsHideOverridesModal,
-    showServiceDisableRepairModal,
-    showAddSecondaryAccountModal,
-    showAddPrimaryAccountModal,
-    showLinkAccountModal,
-    showSuspendModal,
-    showResetPinModal
-  ]);
-
   // Normalize dependent settings to avoid invalid defaults (no updates during render)
   useEffect(() => {
-    let didChange = false;
-
-    const next = Object.fromEntries(
-      Object.entries(moduleSettings).map(([moduleId, module]) => {
-        const nextSettings = module.settings.map((setting) => {
-          if (!setting?.dependency) return setting;
-
-          // Dependent dropdown normalization (legacy: dependency === 41 service settings)
-          if (setting.type === 'dropdown' && setting.dependency === 41) {
-            const availableOptions = getAvailableOptions(setting);
-            if (
-              Array.isArray(availableOptions) &&
-              availableOptions.length > 0 &&
-              !availableOptions.includes(setting.default) &&
-              setting.pmLockState !== 'locked-hidden'
-            ) {
-              didChange = true;
-              return { ...setting, default: availableOptions[0] };
-            }
-          }
-
-          return setting;
-        });
-
-        return [moduleId, nextSettings === module.settings ? module : { ...module, settings: nextSettings }];
-      })
-    );
+    const { next, didChange } = normalizeDependentSettings(moduleSettings);
 
     if (didChange) {
       setModuleSettings(next);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleSettings]);
 
   // Cross-tab sync: if Ops changes in another tab, update in this tab
@@ -724,7 +197,6 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
             showAddOverrideModal ||
             showOverrideCleanupModal ||
             showOverrideConfirmModal ||
-            showOpsHideOverridesModal ||
             showAddSecondaryAccountModal ||
             showAddPrimaryAccountModal ||
             showLinkAccountModal ||
@@ -752,7 +224,6 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     showAddOverrideModal,
     showOverrideCleanupModal,
     showOverrideConfirmModal,
-    showOpsHideOverridesModal,
     showAddSecondaryAccountModal,
     showAddPrimaryAccountModal,
     showLinkAccountModal,
@@ -773,8 +244,6 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           showAddOverrideModal ||
           showOverrideCleanupModal ||
           showOverrideConfirmModal ||
-          showOpsHideOverridesModal ||
-          showServiceDisableRepairModal ||
           showAddSecondaryAccountModal ||
           showAddPrimaryAccountModal ||
           showLinkAccountModal ||
@@ -801,8 +270,6 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     showAddOverrideModal,
     showOverrideCleanupModal,
     showOverrideConfirmModal,
-    showOpsHideOverridesModal,
-    showServiceDisableRepairModal,
     showAddSecondaryAccountModal,
     showAddPrimaryAccountModal,
     showLinkAccountModal,
@@ -828,23 +295,22 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           setIsBlocked(true);
           setBlockReason(reason);
           setActiveUser(activeMasterUser);
+          setIsPMReadOnly(false);
+          setActiveOpsUser('');
           return;
         }
+        setIsPMReadOnly(false);
+        setActiveOpsUser('');
       } else {
-        // Check if master user is active (blocks PM)
+        // PM can access dashboard, but becomes read-only while Ops is active.
         const { canAccess, reason, activeUser: activeMasterUser } = canPMAccess();
-
-        if (!canAccess) {
-          setIsBlocked(true);
-          setBlockReason(reason);
-          setActiveUser(activeMasterUser);
-          return;
-        }
+        setIsPMReadOnly(!canAccess);
+        setActiveOpsUser(!canAccess ? activeMasterUser : '');
+        setBlockReason(!canAccess ? reason : '');
       }
 
       // Access granted
       setIsBlocked(false);
-      setBlockReason('');
       setActiveUser('');
     };
 
@@ -885,8 +351,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
   // Helper function to set user-specific setting
   const setUserSetting = (userId, moduleId, settingId, property, value) => {
-    // Defense-in-depth: Ops can only create/edit doctor overrides when Ops has left the setting unlocked
-    if (isMasterUser()) {
+    // PM is read-only while Ops session is active.
+    if (!isMasterUser() && isPMReadOnly) return;
+
+    // Defense-in-depth: PM can only create/edit overrides when Ops Lock is unlocked for that setting.
+    if (!isMasterUser()) {
       const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
       if (setting && setting.opsLockState !== 'unlocked') return;
     }
@@ -926,34 +395,14 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     return overrides;
   };
 
-  // Helper function to get all override records for a specific setting (value OR lockState OR defaultService)
-  const getAllOverrideRecordsForSetting = (moduleId, settingId) => {
-    const overrides = [];
-    Object.keys(userSettingsOverrides).forEach(key => {
-      const suffix = `-${moduleId}-${settingId}`;
-      if (!key.endsWith(suffix)) return;
-
-      const userId = key.slice(0, -suffix.length);
-      const override = userSettingsOverrides[key];
-      if (!override) return;
-
-      const hasAnyOverrideData =
-        override.value !== undefined ||
-        override.pmLockState !== undefined ||
-        override.defaultService !== undefined;
-      if (!hasAnyOverrideData) return;
-
-      const user = allUsers.find(u => u.id.toString() === userId);
-      overrides.push({
-        userId,
-        userName: user?.name || `User ${userId}`
-      });
-    });
-    return overrides;
-  };
-
   // Helper function to remove user-specific setting override
   const removeUserSetting = (userId, moduleId, settingId) => {
+    if (!isMasterUser() && isPMReadOnly) return;
+    if (!isMasterUser()) {
+      const setting = moduleSettings[moduleId]?.settings.find((s) => s.id === settingId);
+      if (setting && setting.opsLockState !== 'unlocked') return;
+    }
+
     const key = `${userId}-${moduleId}-${settingId}`;
     setUserSettingsOverrides(prev => {
       const updated = { ...prev };
@@ -1011,6 +460,8 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   // Helper function to remove multiple overrides
   // Always removes the entire override since we only keep overrides that differ from BOTH defaults
   const removeMultipleOverrides = (overridesToRemove, moduleId, settingId) => {
+    if (!isMasterUser() && isPMReadOnly) return;
+
     setUserSettingsOverrides(prev => {
       const updated = { ...prev };
       overridesToRemove.forEach(override => {
@@ -1022,43 +473,6 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   };
 
   // ==================== HELPER FUNCTIONS ====================
-
-  // Helper function to compare values (handles arrays properly)
-  const valuesAreEqual = (value1, value2) => {
-    if (Array.isArray(value1) && Array.isArray(value2)) {
-      return JSON.stringify([...value1].sort()) === JSON.stringify([...value2].sort());
-    }
-    return value1 === value2;
-  };
-
-  // Helper function to format lock state for display
-  const formatLockStateDisplay = (lockState) => {
-    switch (lockState) {
-      case 'unlocked': return 'Unlocked';
-      case 'locked-visible': return 'Locked (Visible)';
-      case 'locked-hidden': return 'Locked (Hidden)';
-      default: return lockState;
-    }
-  };
-
-  // Helper function to format value for display
-  const formatValueDisplay = (value) => {
-    if (Array.isArray(value)) {
-      return value.join(', ');
-    }
-    return String(value);
-  };
-
-  // Helper function to generate the "cannot create matching override" alert message
-  const getMatchingOverrideAlertMessage = (value, lockState) => {
-    return `Cannot create an override that matches the practice default.
-
-This setting would have:
-• Value: ${formatValueDisplay(value)}
-• Lock State: ${formatLockStateDisplay(lockState)}
-
-Which is the same as the practice-wide default. An override must differ from the default.`;
-  };
 
   // Helper function to check if an override set matches the default set
   // For service-settings-combined, also pass newDefaultService to check both enabled services and default service
@@ -1087,6 +501,10 @@ Which is the same as the practice-wide default. An override must differ from the
   };
 
   const updateSettingState = (moduleId, settingId, property, value) => {
+    if (!isMasterUser() && isPMReadOnly) {
+      return;
+    }
+
     // Ops inheritance enforcement (source of truth):
     // When Ops locks a setting (locked-visible/locked-hidden), PM must not be able to:
     // - change defaults
@@ -1157,10 +575,6 @@ Which is the same as the practice-wide default. An override must differ from the
   };
 
   // Helper functions for settings logic
-  const getSetting = (moduleId, settingId) => {
-    return moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
-  };
-
   const getSettingById = (settingId) => {
     return Object.values(moduleSettings)
       .flatMap(module => module.settings)
@@ -1195,3175 +609,197 @@ Which is the same as the practice-wide default. An override must differ from the
     return setting.options;
   };
 
+  const applySettingProperty = (moduleId, settingId, property, value) => {
+    setModuleSettings((prev) => ({
+      ...prev,
+      [moduleId]: {
+        ...prev[moduleId],
+        settings: prev[moduleId].settings.map((setting) =>
+          setting.id === settingId ? { ...setting, [property]: value } : setting
+        )
+      }
+    }));
+  };
+
+  // Prototype helper: use currently selected module and first setting with overrides for modal demos.
+  const getPrototypeOpsTarget = () => {
+    const settings = moduleSettings[selectedModule]?.settings || [];
+    if (!settings.length) return null;
+
+    const withOverrides = settings.find((s) => getSettingOverrides(selectedModule, s.id).length > 0);
+    const target = withOverrides || settings[0];
+
+    return {
+      moduleId: selectedModule,
+      settingId: target.id,
+      settingName: target.name,
+      overridesToRemove: getSettingOverrides(selectedModule, target.id),
+    };
+  };
+
+  const openPrototypeOpsHideFlow = () => {
+    const target = getPrototypeOpsTarget();
+    if (!target || target.overridesToRemove.length === 0) {
+      setCrossTabToast('No overrides found in this module. Add an override to preview this flow.');
+      return;
+    }
+    setOpsHideOverridesData(target);
+    setShowOpsHideOverridesModal(true);
+  };
+
+  const openPrototypeOpsVisibleFlow = () => {
+    const target = getPrototypeOpsTarget();
+    if (!target || target.overridesToRemove.length === 0) {
+      setCrossTabToast('No overrides found in this module. Add an override to preview this flow.');
+      return;
+    }
+    setOpsLockVisibleOverridesData(target);
+    setShowOpsLockVisibleOverridesModal(true);
+  };
+
   const filteredUsers = allUsers.filter(user =>
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (user.specialty && user.specialty.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (user.role && user.role.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Modal Components
-  const EmailAttestationModal = () => (
-    showEmailModal && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Email Compliance Attestation</h3>
-            <button onClick={() => setShowEmailModal(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="mb-6">
-            <p className="text-sm text-gray-600 leading-relaxed">
-              All our users are following HIPAA and HITECH compliance.
-            </p>
-          </div>
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => setShowEmailModal(false)}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                updateSettingState('controls', 22, 'default', 'True');
-                setShowEmailModal(false);
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              I Attest
-            </button>
-          </div>
-        </div>
-      </div>
-    )
+  const availableLinkedAssignmentUsers = buildLinkedAssignmentCandidates(
+    allUsers,
+    selectedUser?.id,
+    seededLinkedAssignmentCandidates
   );
 
-  const HipaaEmailConfirmModal = () => (
-    showHipaaEmailConfirm && hipaaAttestationUser && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-lg w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">HIPAA Attestation Confirmed</h3>
-            <button onClick={() => {
-              setShowHipaaEmailConfirm(false);
-              setHipaaAttestationUser(null);
-            }} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex items-center justify-center mb-4">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-
-            <h4 className="text-center text-xl font-semibold text-gray-900 mb-2">
-              Send Note on Email Enabled Successfully
-            </h4>
-
-            <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-lg mb-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <svg className="w-5 h-5 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
-                    <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-purple-900">Email Notification Sent</p>
-                  <p className="text-sm text-purple-800 mt-1">
-                    An email has been sent to <strong>{hipaaAttestationUser.email}</strong> informing them that:
-                  </p>
-                  <ul className="mt-2 text-sm text-purple-800 list-disc list-inside space-y-1">
-                    <li>Send Note on Email has been enabled for their account</li>
-                    <li>You have attested for HIPAA compliance on their behalf</li>
-                    <li>Their notes can now be sent via email to patients</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <h5 className="text-sm font-semibold text-gray-900 mb-2">Details:</h5>
-              <div className="space-y-2 text-sm text-gray-700">
-                <div className="flex justify-between">
-                  <span className="font-medium">User:</span>
-                  <span>{hipaaAttestationUser.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Email:</span>
-                  <span>{hipaaAttestationUser.email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Setting:</span>
-                  <span>Send Note on Email</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Status:</span>
-                  <span className="text-green-600 font-semibold">Enabled</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Attested By:</span>
-                  <span>Practice Manager</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              onClick={() => {
-                setShowHipaaEmailConfirm(false);
-                setHipaaAttestationUser(null);
-              }}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    )
+  const selectedLinkedAssignmentUser = availableLinkedAssignmentUsers.find(
+    (u) => String(u.id) === String(selectedNewUser)
   );
 
-  const SuspendAccountModal = () => (
-    showSuspendModal && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Confirm Account Suspension</h3>
-            <button onClick={() => setShowSuspendModal(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                <Shield className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-900">{selectedUser?.name}</p>
-                <p className="text-sm text-gray-600">{selectedUser?.email}</p>
-              </div>
-            </div>
-            <p className="text-sm text-gray-700 leading-relaxed">
-              Are you sure you want to suspend this user's account? They will immediately lose access to the system and won't be able to log in until the account is reactivated.
-            </p>
-          </div>
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => setShowSuspendModal(false)}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                setShowSuspendModal(false);
-                alert('Account suspended successfully!');
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
-              Suspend Account
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const ResetPinModal = () => (
-    showResetPinModal && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">PIN Reset Confirmation</h3>
-            <button onClick={() => setShowResetPinModal(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                <Shield className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-900">PIN Reset Successful</p>
-                <p className="text-sm text-gray-600">{selectedUser?.name}</p>
-              </div>
-            </div>
-            <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded">
-              <p className="text-sm text-green-800 leading-relaxed">
-                Reset code instructions have been sent to <strong>{selectedUser?.email}</strong>.
-                The user will receive a temporary PIN and will be required to set a new PIN on their next login.
-              </p>
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <button
-              onClick={() => setShowResetPinModal(false)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const OverrideConfirmModal = () => (
-    showOverrideConfirmModal && pendingSettingChange && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-lg w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Override Default Setting</h3>
-            <button
-              onClick={() => {
-                setShowOverrideConfirmModal(false);
-                setPendingSettingChange(null);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                <Settings className="w-5 h-5 text-orange-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-gray-900">{selectedUser?.name}</p>
-                <p className="text-sm text-gray-600">Setting: {pendingSettingChange.settingName}</p>
-              </div>
-            </div>
-
-            <div className="bg-orange-50 border-l-4 border-orange-400 p-4 rounded mb-4">
-              <p className="text-sm text-orange-800 font-medium mb-2">
-                You are about to change the default setting for this user.
-              </p>
-              <p className="text-sm text-orange-700 leading-relaxed">
-                This will override the practice-wide default setting. The user will have a custom configuration different from other users.
-              </p>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">
-                  {pendingSettingChange.isLockStateChange ? 'Practice Lock State:' : 'Practice Default:'}
-                </span>
-                <span className="text-sm text-gray-900 font-medium">
-                  {Array.isArray(pendingSettingChange.defaultValue)
-                    ? pendingSettingChange.defaultValue.join(', ')
-                    : pendingSettingChange.isLockStateChange
-                      ? pendingSettingChange.defaultValue === 'unlocked'
-                        ? 'Unlocked'
-                        : pendingSettingChange.defaultValue === 'locked-visible'
-                          ? 'Locked (Visible)'
-                          : 'Locked (Hidden)'
-                      : pendingSettingChange.defaultValue}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">
-                  {pendingSettingChange.isLockStateChange ? 'New Lock State:' : 'New User Value:'}
-                </span>
-                <span className="text-sm text-blue-700 font-medium">
-                  {Array.isArray(pendingSettingChange.newValue)
-                    ? pendingSettingChange.newValue.join(', ')
-                    : pendingSettingChange.isLockStateChange
-                      ? pendingSettingChange.newValue === 'unlocked'
-                        ? 'Unlocked'
-                        : pendingSettingChange.newValue === 'locked-visible'
-                          ? 'Locked (Visible)'
-                          : 'Locked (Hidden)'
-                      : pendingSettingChange.newValue}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => {
-                setShowOverrideConfirmModal(false);
-                setPendingSettingChange(null);
-              }}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (pendingSettingChange) {
-                  const propertyToUpdate = pendingSettingChange.isLockStateChange ? 'pmLockState' : 'value';
-                  setUserSetting(
-                    pendingSettingChange.userId,
-                    pendingSettingChange.moduleId,
-                    pendingSettingChange.settingId,
-                    propertyToUpdate,
-                    pendingSettingChange.newValue
-                  );
-                }
-                setShowOverrideConfirmModal(false);
-                setPendingSettingChange(null);
-              }}
-              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-            >
-              Confirm Override
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const OverrideCleanupModal = () => (
-    showOverrideCleanupModal && overrideCleanupData && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Override Cleanup Required</h3>
-            <button
-              onClick={() => {
-                setShowOverrideCleanupModal(false);
-                setOverrideCleanupData(null);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="mb-6">
-            {/* Info Section */}
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <Settings className="w-5 h-5 text-amber-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-gray-900 mb-1">
-                  {overrideCleanupData.isLockStateChange ? 'Lock State Change Detected' : 'Default Value Change Detected'}
-                </p>
-                <p className="text-sm text-gray-600">Setting: {overrideCleanupData.settingName}</p>
-              </div>
-            </div>
-
-            {/* Warning Banner */}
-            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded mb-4">
-              <p className="text-sm text-amber-800 font-medium mb-2">
-                {overrideCleanupData.isLockStateChange
-                  ? 'Some user overrides now match BOTH default value and lock state'
-                  : 'Some user overrides now match BOTH default value and lock state'}
-              </p>
-              <p className="text-sm text-amber-700 leading-relaxed">
-                After this change, the following users will have overrides where BOTH the value and lock state match the practice-wide defaults.
-                These redundant overrides will be automatically removed, and these users will inherit the practice-wide settings.
-              </p>
-              <p className="text-sm text-amber-700 leading-relaxed mt-2">
-                <strong>Note:</strong> An override only exists when it differs from the default. Since both properties now match, the override is no longer needed.
-              </p>
-            </div>
-
-            {/* Value Change Summary */}
-            <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">
-                  {overrideCleanupData.isLockStateChange ? 'Current Lock State:' : 'Current Default:'}
-                </span>
-                <span className="text-sm text-gray-900 font-medium">
-                  {overrideCleanupData.isLockStateChange
-                    ? overrideCleanupData.oldDefault === 'unlocked'
-                      ? 'Unlocked'
-                      : overrideCleanupData.oldDefault === 'locked-visible'
-                        ? 'Locked (Visible)'
-                        : 'Locked (Hidden)'
-                    : Array.isArray(overrideCleanupData.oldDefault)
-                      ? overrideCleanupData.oldDefault.join(', ')
-                      : overrideCleanupData.oldDefault}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">
-                  {overrideCleanupData.isLockStateChange ? 'New Lock State:' : 'New Default:'}
-                </span>
-                <span className="text-sm text-blue-700 font-medium">
-                  {overrideCleanupData.isLockStateChange
-                    ? overrideCleanupData.newDefault === 'unlocked'
-                      ? 'Unlocked'
-                      : overrideCleanupData.newDefault === 'locked-visible'
-                        ? 'Locked (Visible)'
-                        : 'Locked (Hidden)'
-                    : Array.isArray(overrideCleanupData.newDefault)
-                      ? overrideCleanupData.newDefault.join(', ')
-                      : overrideCleanupData.newDefault}
-                </span>
-              </div>
-            </div>
-
-            {/* Affected Users List */}
-            {overrideCleanupData.redundantOverrides.length > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-sm font-semibold text-red-900 mb-3">
-                  Overrides to be removed ({overrideCleanupData.redundantOverrides.length} user{overrideCleanupData.redundantOverrides.length !== 1 ? 's' : ''}):
-                </p>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {overrideCleanupData.redundantOverrides.map((override, index) => (
-                    <div key={index} className="flex items-center justify-between bg-white p-3 rounded border border-red-100">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                          <Users className="w-4 h-4 text-red-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{override.userName}</p>
-                          <p className="text-xs text-gray-600">
-                            Value: {Array.isArray(override.value) ? override.value.join(', ') : override.value}
-                          </p>
-                          <p className="text-xs text-gray-600">
-                            Lock: {override.pmLockState === 'unlocked'
-                              ? 'Unlocked'
-                              : override.pmLockState === 'locked-visible'
-                                ? 'Locked (Visible)'
-                                : 'Locked (Hidden)'}
-                          </p>
-                        </div>
-                      </div>
-                      <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">
-                        Will be removed
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => {
-                setShowOverrideCleanupModal(false);
-                setOverrideCleanupData(null);
-              }}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (overrideCleanupData) {
-                  // Remove redundant overrides (entire override removed)
-                  removeMultipleOverrides(
-                    overrideCleanupData.redundantOverrides,
-                    overrideCleanupData.moduleId,
-                    overrideCleanupData.settingId
-                  );
-
-                  // Now proceed with updating the default value or lock state
-                  setModuleSettings(prev => ({
-                    ...prev,
-                    [overrideCleanupData.moduleId]: {
-                      ...prev[overrideCleanupData.moduleId],
-                      settings: prev[overrideCleanupData.moduleId].settings.map(setting =>
-                        setting.id === overrideCleanupData.settingId
-                          ? { ...setting, [overrideCleanupData.property]: overrideCleanupData.newDefault }
-                          : setting
-                      )
-                    }
-                  }));
-                }
-                setShowOverrideCleanupModal(false);
-                setOverrideCleanupData(null);
-              }}
-              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-            >
-              Confirm & Remove Overrides
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const OpsHideOverridesModal = () => (
-    showOpsHideOverridesModal && opsHideOverridesData && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Confirm: Hide Setting (Overrides Will Be Removed)</h3>
-            <button
-              onClick={() => {
-                setShowOpsHideOverridesModal(false);
-                setOpsHideOverridesData(null);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="mb-6">
-            <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded mb-4">
-              <p className="text-sm text-red-900 font-semibold mb-2">
-                You are setting Ops Lock to <span className="font-bold">Locked (Hidden)</span>.
-              </p>
-              <p className="text-sm text-red-800 leading-relaxed">
-                This will permanently remove existing doctor overrides for this setting so there are no hidden, still-effective overrides.
-              </p>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Setting:</span>
-                <span className="text-sm text-gray-900 font-medium">{opsHideOverridesData.settingName}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Overrides to remove:</span>
-                <span className="text-sm text-red-700 font-medium">
-                  {opsHideOverridesData.overridesToRemove.length}
-                </span>
-              </div>
-            </div>
-
-            {opsHideOverridesData.overridesToRemove.length > 0 && (
-              <div className="border border-red-200 rounded-lg p-4 bg-red-50">
-                <p className="text-sm font-semibold text-red-900 mb-3">
-                  Affected doctors/users:
-                </p>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {opsHideOverridesData.overridesToRemove.map((o) => (
-                    <div key={o.userId} className="flex items-center justify-between bg-white p-3 rounded border border-red-100">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                          <Users className="w-4 h-4 text-red-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{o.userName}</p>
-                          <p className="text-xs text-gray-600">Override will be removed</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => {
-                setShowOpsHideOverridesModal(false);
-                setOpsHideOverridesData(null);
-              }}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (opsHideOverridesData) {
-                  removeMultipleOverrides(
-                    opsHideOverridesData.overridesToRemove,
-                    opsHideOverridesData.moduleId,
-                    opsHideOverridesData.settingId
-                  );
-                  updateSettingState(
-                    opsHideOverridesData.moduleId,
-                    opsHideOverridesData.settingId,
-                    'opsLockState',
-                    'locked-hidden'
-                  );
-                }
-                setShowOpsHideOverridesModal(false);
-                setOpsHideOverridesData(null);
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
-              Confirm & Remove Overrides
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const OpsLockVisibleOverridesModal = () => (
-    showOpsLockVisibleOverridesModal && opsLockVisibleOverridesData && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Ops Lock: Locked (Visible)</h3>
-            <button
-              onClick={() => {
-                setShowOpsLockVisibleOverridesModal(false);
-                setOpsLockVisibleOverridesData(null);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="mb-6 space-y-4">
-            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
-              <p className="text-sm text-amber-900 font-semibold mb-2">
-                You are setting Ops Lock to <span className="font-bold">Locked (Visible)</span>.
-              </p>
-              <p className="text-sm text-amber-800 leading-relaxed">
-                PM will still see this setting but cannot change defaults or manage overrides while it is Ops-locked.
-                Existing doctor overrides can either be kept (and will reappear if Ops unlocks later) or removed now.
-              </p>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Setting:</span>
-                <span className="text-sm text-gray-900 font-medium">{opsLockVisibleOverridesData.settingName}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Existing overrides:</span>
-                <span className="text-sm text-amber-700 font-medium">
-                  {opsLockVisibleOverridesData.overridesToRemove.length}
-                </span>
-              </div>
-            </div>
-
-            {opsLockVisibleOverridesData.overridesToRemove.length > 0 && (
-              <div className="border border-amber-200 rounded-lg p-4 bg-amber-50">
-                <p className="text-sm font-semibold text-amber-900 mb-3">
-                  Affected doctors/users:
-                </p>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {opsLockVisibleOverridesData.overridesToRemove.map((o) => (
-                    <div key={o.userId} className="flex items-center justify-between bg-white p-3 rounded border border-amber-100">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
-                          <Users className="w-4 h-4 text-amber-700" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{o.userName}</p>
-                          <p className="text-xs text-gray-600">Override exists for this setting</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => {
-                // Keep overrides, just apply ops lock visible
-                if (opsLockVisibleOverridesData) {
-                  updateSettingState(
-                    opsLockVisibleOverridesData.moduleId,
-                    opsLockVisibleOverridesData.settingId,
-                    'opsLockState',
-                    'locked-visible'
-                  );
-                }
-                setShowOpsLockVisibleOverridesModal(false);
-                setOpsLockVisibleOverridesData(null);
-              }}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Keep overrides
-            </button>
-            <button
-              onClick={() => {
-                if (opsLockVisibleOverridesData) {
-                  removeMultipleOverrides(
-                    opsLockVisibleOverridesData.overridesToRemove,
-                    opsLockVisibleOverridesData.moduleId,
-                    opsLockVisibleOverridesData.settingId
-                  );
-                  updateSettingState(
-                    opsLockVisibleOverridesData.moduleId,
-                    opsLockVisibleOverridesData.settingId,
-                    'opsLockState',
-                    'locked-visible'
-                  );
-                }
-                setShowOpsLockVisibleOverridesModal(false);
-                setOpsLockVisibleOverridesData(null);
-              }}
-              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-            >
-              Remove overrides & lock
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const ServiceDisableRepairModal = () => (
-    showServiceDisableRepairModal && serviceDisableRepairData && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-3xl w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Confirm: Disable Service (Overrides Will Be Repaired)</h3>
-            <button
-              onClick={() => {
-                setShowServiceDisableRepairModal(false);
-                setServiceDisableRepairData(null);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="mb-6 space-y-4">
-            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
-              <p className="text-sm text-amber-900 font-semibold mb-2">
-                You are disabling: <span className="font-bold">{serviceDisableRepairData.removedService}</span>
-              </p>
-              <p className="text-sm text-amber-800 leading-relaxed">
-                This will update any doctor/user overrides that reference this service so there are no invalid default services or enabled-service lists.
-              </p>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Affected users:</span>
-                <span className="text-sm text-amber-700 font-medium">
-                  {serviceDisableRepairData.impactedUsers.length}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Resulting enabled services:</span>
-                <span className="text-sm text-gray-900 font-medium">
-                  {serviceDisableRepairData.newEnabledServices.join(', ')}
-                </span>
-              </div>
-            </div>
-
-            {serviceDisableRepairData.impactedUsers.length > 0 && (
-              <div className="border border-amber-200 rounded-lg p-4 bg-amber-50">
-                <p className="text-sm font-semibold text-amber-900 mb-3">
-                  Overrides to repair:
-                </p>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {serviceDisableRepairData.impactedUsers.map((u) => (
-                    <div key={u.userId} className="bg-white p-3 rounded border border-amber-100">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
-                            <Users className="w-4 h-4 text-amber-700" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{u.userName}</p>
-                            <p className="text-xs text-gray-600">
-                              Default service: <span className="font-medium">{u.oldDefaultService}</span> →{' '}
-                              <span className="font-medium">{u.newDefaultService}</span>
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-700">
-                          Enabled: {u.oldEnabledServices.join(', ')} → {u.newEnabledServices.join(', ')}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => {
-                setShowServiceDisableRepairModal(false);
-                setServiceDisableRepairData(null);
-              }}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (serviceDisableRepairData) {
-                  // Repair impacted overrides
-                  serviceDisableRepairData.impactedUsers.forEach((u) => {
-                    if (u.shouldUpdateEnabledServices) {
-                      setUserSetting(u.userId, serviceDisableRepairData.moduleId, serviceDisableRepairData.settingId, 'value', u.newEnabledServices);
-                    }
-                    if (u.shouldUpdateDefaultService) {
-                      setUserSetting(u.userId, serviceDisableRepairData.moduleId, serviceDisableRepairData.settingId, 'defaultService', u.newDefaultService);
-                    }
-                  });
-
-                  // Apply the practice-level change
-                  updateSettingState(
-                    serviceDisableRepairData.moduleId,
-                    serviceDisableRepairData.settingId,
-                    'default',
-                    serviceDisableRepairData.newEnabledServices
-                  );
-
-                  // Ensure practice defaultService remains valid
-                  if (
-                    serviceDisableRepairData.newEnabledServices.length > 0 &&
-                    !serviceDisableRepairData.newEnabledServices.includes(serviceDisableRepairData.currentPracticeDefaultService)
-                  ) {
-                    updateSettingState(
-                      serviceDisableRepairData.moduleId,
-                      serviceDisableRepairData.settingId,
-                      'defaultService',
-                      serviceDisableRepairData.newEnabledServices[0]
-                    );
-                  }
-                }
-                setShowServiceDisableRepairModal(false);
-                setServiceDisableRepairData(null);
-              }}
-              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-            >
-              Confirm & Repair Overrides
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const GoogleSignoutConfirmModal = () => (
-    showGoogleSignoutModal && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Confirm Sign Out</h3>
-            <button
-              onClick={() => setShowGoogleSignoutModal(false)}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="mb-6">
-            <div className="bg-orange-50 border-l-4 border-orange-400 p-4 rounded mb-4">
-              <p className="text-sm text-orange-800 leading-relaxed">
-                Are you sure you want to sign out from Google Calendar? This will disconnect the integration and you won't be able to sync calendar events until you sign in again.
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => setShowGoogleSignoutModal(false)}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                setIsGoogleSignedIn(false);
-                setShowGoogleSignoutModal(false);
-                updateSettingState('teleconsult-settings', 71, 'default', false);
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  const AddOverrideModal = () => {
-    const [selectedUserId, setSelectedUserId] = useState('');
-    const [overrideValue, setOverrideValue] = useState('');
-    const [overrideLockState, setOverrideLockState] = useState('unlocked');
-    const [overrideDefaultService, setOverrideDefaultService] = useState('');
-    const [validationError, setValidationError] = useState('');
-
-    // Initialize values for service-settings-combined when modal opens
-    React.useEffect(() => {
-      if (showAddOverrideModal && currentOverrideSetting) {
-        const { settingType, defaultValue } = currentOverrideSetting;
-        if (settingType === 'service-settings-combined' && overrideValue === '') {
-          const enabledServices = defaultValue.default || defaultValue;
-          setOverrideValue(JSON.stringify(enabledServices));
-          setOverrideDefaultService(defaultValue.defaultService || enabledServices[0]);
-        }
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [overrideValue]);
-
-    // Clear validation error when user makes changes
-    React.useEffect(() => {
-      if (validationError) {
-        setValidationError('');
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [overrideValue, overrideLockState, overrideDefaultService]);
-
-    if (!showAddOverrideModal || !currentOverrideSetting) return null;
-
-    const { moduleId, settingId, settingName, settingType, settingOptions, defaultValue } = currentOverrideSetting;
-
-    // Get users who don't already have an override for this setting
-    const existingOverrides = getSettingOverrides(moduleId, settingId);
-    const existingUserIds = existingOverrides.map(o => o.userId);
-    const availableUsers = allUsers.filter(u => !existingUserIds.includes(u.id.toString()));
-
-    const handleSave = () => {
-      // Defense-in-depth: Ops can only create doctor overrides when Ops has left the setting unlocked
-      if (isMasterUser()) {
-        const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
-        if (setting && setting.opsLockState !== 'unlocked') {
-          alert('Ops overrides are only allowed when Ops Lock is set to Unlocked for this setting.');
-          return;
-        }
-      }
-
-      if (!selectedUserId) {
-        alert('Please select a user');
-        return;
-      }
-
-      // If locked-hidden, no need to set an override value
-      if (overrideLockState !== 'locked-hidden' && overrideValue === '') {
-        alert('Please set an override value');
-        return;
-      }
-
-      // Check if this is Send Note on Email being enabled (setting ID 22 and value is 'True')
-      const isSendNoteEmailEnabled = settingId === 22 && overrideValue === 'True';
-      if (isSendNoteEmailEnabled && !hipaaAttestationChecked) {
-        alert('Please attest for HIPAA compliance on behalf of the user before enabling Send Note on Email');
-        return;
-      }
-
-      // For locked-hidden, use the default value if no override value is set
-      let valueToSet = overrideValue === '' ? defaultValue : overrideValue;
-
-      // Parse JSON strings for array-based settings
-      if (settingType === 'order-list' || settingType === 'time-multiselect' || settingType === 'multiselect' || settingType === 'service-settings-combined') {
-        if (typeof valueToSet === 'string' && valueToSet !== '') {
-          try {
-            valueToSet = JSON.parse(valueToSet);
-          } catch (e) {
-            // If parse fails, keep as string
-          }
-        }
-      }
-
-      // VALIDATION: Check if the override would match BOTH default value and lock state
-      // For service-settings-combined, also pass the defaultService
-      const wouldMatchDefault = doesOverrideMatchDefault(selectedUserId, moduleId, settingId, valueToSet, overrideLockState, overrideDefaultService);
-
-      if (wouldMatchDefault) {
-        setValidationError(getMatchingOverrideAlertMessage(valueToSet, overrideLockState));
-        return;
-      }
-
-      setUserSetting(selectedUserId, moduleId, settingId, 'value', valueToSet);
-      setUserSetting(selectedUserId, moduleId, settingId, 'pmLockState', overrideLockState);
-
-      // For service-settings-combined, also save the default service
-      if (settingType === 'service-settings-combined' && overrideDefaultService) {
-        setUserSetting(selectedUserId, moduleId, settingId, 'defaultService', overrideDefaultService);
-      }
-
-      // If Send Note on Email was enabled, show email confirmation modal
-      if (isSendNoteEmailEnabled) {
-        const user = allUsers.find(u => u.id.toString() === selectedUserId);
-        setHipaaAttestationUser(user);
-        setShowHipaaEmailConfirm(true);
-      }
-
-      setShowAddOverrideModal(false);
-      setCurrentOverrideSetting(null);
-      setSelectedUserId('');
-      setOverrideValue('');
-      setOverrideLockState('unlocked');
-      setOverrideDefaultService('');
-      setHipaaAttestationChecked(false);
-      setValidationError('');
-    };
-
-    const handleCancel = () => {
-      setShowAddOverrideModal(false);
-      setCurrentOverrideSetting(null);
-      setSelectedUserId('');
-      setOverrideValue('');
-      setOverrideLockState('unlocked');
-      setOverrideDefaultService('');
-      setHipaaAttestationChecked(false);
-      setValidationError('');
-    };
-
-    // Initialize override value when user is selected
-    const handleUserSelect = (userId) => {
-      setSelectedUserId(userId);
-      // Don't auto-set the override value, let user choose explicitly
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Add User Override</h3>
-            <button onClick={handleCancel} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="mb-6 space-y-4">
-            <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Setting:</p>
-              <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{settingName}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Practice Default:</p>
-              <p className="text-sm text-blue-700 font-semibold bg-blue-50 p-3 rounded-lg">
-                {settingType === 'service-settings-combined'
-                  ? `Enabled: ${defaultValue.default?.join(', ') || defaultValue.join(', ')} | Default: ${defaultValue.defaultService}`
-                  : (Array.isArray(defaultValue) ? defaultValue.join(', ') : defaultValue)
-                }
-              </p>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">Select User:</label>
-              <select
-                value={selectedUserId}
-                onChange={(e) => handleUserSelect(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">-- Select a user --</option>
-                {availableUsers.map(user => (
-                  <option key={user.id} value={user.id}>
-                    {user.name} {user.type === 'primary' ? `(${user.specialty})` : `(${user.role})`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedUserId && overrideLockState !== 'locked-hidden' && (
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-2">Override Value:</label>
-                {(settingType === 'dropdown' || settingType === 'range-selector') && (
-                  <select
-                    value={overrideValue}
-                    onChange={(e) => setOverrideValue(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">-- Select override value --</option>
-                    {settingOptions.map(option => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                )}
-                {settingType === 'toggle' && (
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => setOverrideValue('True')}
-                      className={`px-4 py-2 rounded-lg transition-colors ${
-                        overrideValue === 'True' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      True
-                    </button>
-                    <button
-                      onClick={() => setOverrideValue('False')}
-                      className={`px-4 py-2 rounded-lg transition-colors ${
-                        overrideValue === 'False' ? 'bg-gray-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      False
-                    </button>
-                  </div>
-                )}
-                {settingType === 'order-list' && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-500 mb-2">Select items in the order you want them to appear (click to toggle)</p>
-                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                      {settingOptions.map(option => {
-                        const selectedItems = overrideValue ? (typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue) : [];
-                        const isSelected = selectedItems.includes(option);
-                        return (
-                          <label key={option} className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
-                            isSelected ? 'bg-blue-100 border border-blue-300' : 'bg-gray-50 hover:bg-gray-100'
-                          }`}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                let newItems;
-                                if (e.target.checked) {
-                                  newItems = [...selectedItems, option];
-                                } else {
-                                  newItems = selectedItems.filter(item => item !== option);
-                                }
-                                setOverrideValue(JSON.stringify(newItems));
-                              }}
-                              className="w-4 h-4"
-                            />
-                            <span className="text-sm">{option}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    {overrideValue && (() => {
-                      const selectedItems = typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue;
-                      return selectedItems.length > 0 && (
-                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                          Selected order: {selectedItems.join(' → ')}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-                {settingType === 'time-multiselect' && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-500 mb-2">Select up to 6 sync times</p>
-                    <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                      {settingOptions.map(option => {
-                        const selectedItems = overrideValue ? (typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue) : [];
-                        const isSelected = selectedItems.includes(option);
-                        const canSelect = selectedItems.length < 6 || isSelected;
-                        return (
-                          <label key={option} className={`flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${
-                            isSelected
-                              ? 'bg-blue-100 border border-blue-300 text-blue-700'
-                              : canSelect
-                                ? 'bg-gray-50 hover:bg-gray-100'
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                          }`}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              disabled={!canSelect && !isSelected}
-                              onChange={(e) => {
-                                let newItems;
-                                if (e.target.checked) {
-                                  newItems = [...selectedItems, option];
-                                } else {
-                                  newItems = selectedItems.filter(item => item !== option);
-                                }
-                                setOverrideValue(JSON.stringify(newItems));
-                              }}
-                              className="w-3 h-3"
-                            />
-                            <span>{option}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    {overrideValue && (() => {
-                      const selectedItems = typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue;
-                      return selectedItems.length > 0 && (
-                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                          Selected: {selectedItems.join(', ')} ({selectedItems.length}/6)
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-                {settingType === 'multiselect' && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-500 mb-2">Select services (at least one required)</p>
-                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                      {settingOptions.map(option => {
-                        const selectedItems = overrideValue ? (typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue) : [];
-                        const isSelected = selectedItems.includes(option);
-                        return (
-                          <label key={option} className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
-                            isSelected ? 'bg-blue-100 border border-blue-300' : 'bg-gray-50 hover:bg-gray-100'
-                          }`}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                let newItems;
-                                if (e.target.checked) {
-                                  newItems = [...selectedItems, option];
-                                } else {
-                                  newItems = selectedItems.filter(item => item !== option);
-                                }
-                                setOverrideValue(JSON.stringify(newItems));
-                              }}
-                              className="w-4 h-4"
-                            />
-                            <span className="text-sm">{option}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    {overrideValue && (() => {
-                      const selectedItems = typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue;
-                      return selectedItems.length > 0 && (
-                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                          Selected: {selectedItems.join(', ')}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {/* Service Settings Combined Type */}
-                {settingType === 'service-settings-combined' && (
-                  <div className="space-y-4">
-                    <p className="text-xs text-gray-500 mb-2">Configure enabled services and default service</p>
-
-                    {/* Enabled Services */}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-2">Enabled Service Settings</label>
-                      <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                        {settingOptions.map(option => {
-                          const selectedItems = overrideValue ? (typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue) : [];
-                          const isSelected = selectedItems.includes(option);
-                          return (
-                            <label key={option} className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
-                              isSelected ? 'bg-blue-100 border border-blue-300' : 'bg-gray-50 hover:bg-gray-100'
-                            }`}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={(e) => {
-                                  let newItems;
-                                  if (e.target.checked) {
-                                    newItems = [...selectedItems, option];
-                                  } else {
-                                    // Don't allow unchecking if it's the last one
-                                    if (selectedItems.length === 1) return;
-                                    newItems = selectedItems.filter(item => item !== option);
-                                  }
-                                  setOverrideValue(JSON.stringify(newItems));
-
-                                  // Update default service state if needed
-                                  const currentDefaultService = overrideDefaultService || defaultValue.defaultService;
-                                  if (!newItems.includes(currentDefaultService)) {
-                                    setOverrideDefaultService(newItems[0]);
-                                  }
-                                }}
-                                className="w-4 h-4"
-                              />
-                              <span className="text-sm">{option}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {overrideValue && (() => {
-                        const selectedItems = typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue;
-                        return selectedItems.length > 0 && (
-                          <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded mt-1">
-                            Selected: {selectedItems.join(', ')}
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* Default Service */}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-2">Default Service Setting</label>
-                      <select
-                        value={overrideDefaultService || defaultValue.defaultService}
-                        onChange={(e) => setOverrideDefaultService(e.target.value)}
-                        className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        {(() => {
-                          const enabledServices = overrideValue ? (typeof overrideValue === 'string' ? JSON.parse(overrideValue) : overrideValue) : defaultValue.default;
-                          return enabledServices.map(service => (
-                            <option key={service} value={service}>{service}</option>
-                          ));
-                        })()}
-                      </select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Default service must be one of the enabled services
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedUserId && overrideLockState === 'locked-hidden' && (
-              <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
-                <p className="text-sm text-yellow-800">
-                  <strong>Note:</strong> Setting will be hidden from this user. No override value is required since they won't see this setting.
-                </p>
-              </div>
-            )}
-
-            {selectedUserId && (
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-2">Lock State:</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => setOverrideLockState('unlocked')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      overrideLockState === 'unlocked'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Unlocked
-                  </button>
-                  <button
-                    onClick={() => setOverrideLockState('locked-visible')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      overrideLockState === 'locked-visible'
-                        ? 'bg-orange-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Locked Visible
-                  </button>
-                  <button
-                    onClick={() => setOverrideLockState('locked-hidden')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      overrideLockState === 'locked-hidden'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Locked Hidden
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  {overrideLockState === 'unlocked' && 'User can change this setting'}
-                  {overrideLockState === 'locked-visible' && 'User can see but cannot change this setting'}
-                  {overrideLockState === 'locked-hidden' && 'Setting is hidden from user'}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {availableUsers.length === 0 && (
-            <div className="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
-              <p className="text-sm text-yellow-800">All users already have overrides for this setting.</p>
-            </div>
-          )}
-
-          {/* HIPAA Attestation for Send Note on Email */}
-          {settingId === 22 && overrideValue === 'True' && selectedUserId && (
-            <div className="mb-6 p-4 bg-purple-50 border-l-4 border-purple-500 rounded-lg">
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                </div>
-                <div className="ml-3 flex-1">
-                  <h4 className="text-sm font-semibold text-purple-900 mb-2">HIPAA Compliance Attestation Required</h4>
-                  <p className="text-sm text-purple-800 mb-3">
-                    Enabling Send Note on Email for this user requires HIPAA compliance attestation. As the Practice Manager, you are attesting on behalf of the user that their email complies with Privacy and Data Protection laws.
-                  </p>
-                  <label className="flex items-start cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={hipaaAttestationChecked}
-                      onChange={(e) => setHipaaAttestationChecked(e.target.checked)}
-                      className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                    />
-                    <span className="ml-2 text-sm text-purple-900">
-                      <strong>I attest</strong> that enabling Send Note on Email for{' '}
-                      {allUsers.find(u => u.id.toString() === selectedUserId)?.name || 'this user'}{' '}
-                      complies with HIPAA requirements and that the user's email system meets Privacy and Data Protection standards. An email notification will be sent to the user.
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Validation Error Message */}
-          {validationError && (
-            <div className="mt-4 p-4 bg-red-50 border-l-4 border-red-400 rounded">
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <svg className="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="ml-3 flex-1">
-                  <p className="text-sm text-red-800 whitespace-pre-line">{validationError}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-3 justify-end mt-6">
-            <button
-              onClick={handleCancel}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!selectedUserId || (overrideLockState !== 'locked-hidden' && overrideValue === '') || availableUsers.length === 0}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-            >
-              Add Override
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const AddSecondaryAccountModal = () => {
-    const roleOptions = ['Nurse', 'Lab Technician', 'Medical Assistant', 'Phlebotomist', 'Radiology Technician'];
-
-    const updateSecondaryPermission = (permission, value) => {
-      setNewSecondaryAccount(prev => {
-        const updated = { ...prev, permissions: { ...prev.permissions, [permission]: value } };
-
-        // Handle dependencies
-        if (permission === 'canGenerateNotes' && !value) {
-          updated.permissions.editGeneratedNotes = false;
-          updated.permissions.pushToEHR = false;
-        } else if (permission === 'editGeneratedNotes' && !value) {
-          updated.permissions.pushToEHR = false;
-        }
-
-        return updated;
-      });
-    };
-
-    const isPermissionEnabled = (permission) => {
-      switch (permission) {
-        case 'createConsults':
-          return true;
-        case 'canGenerateNotes':
-          return true;
-        case 'editGeneratedNotes':
-          return newSecondaryAccount.permissions.canGenerateNotes;
-        case 'pushToEHR':
-          return newSecondaryAccount.permissions.canGenerateNotes && newSecondaryAccount.permissions.editGeneratedNotes;
-        default:
-          return false;
-      }
-    };
-
-    const handleAddAccount = () => {
-      if (!newSecondaryAccount.name || !newSecondaryAccount.role || !newSecondaryAccount.email) {
-        alert('Please fill in all fields');
-        return;
-      }
-
-      const newAccount = {
-        id: `sec${Date.now()}`,
-        name: newSecondaryAccount.name,
-        type: 'secondary',
-        role: newSecondaryAccount.role,
-        email: newSecondaryAccount.email,
-        permissions: { ...newSecondaryAccount.permissions }
-      };
-
-      setAllUsers(prev => [...prev, newAccount]);
-      setShowAddSecondaryAccountModal(false);
-      setNewSecondaryAccount({
-        name: '',
-        role: '',
-        email: '',
-        permissions: {
-          createConsults: true,
-          canGenerateNotes: false,
-          editGeneratedNotes: false,
-          pushToEHR: false
-        }
-      });
-    };
-
-    if (!showAddSecondaryAccountModal) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Add Secondary Account</h3>
-            <button onClick={() => setShowAddSecondaryAccountModal(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Cost Notification */}
-          <div className="mb-6 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-            <div className="flex items-start">
-              <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-              </svg>
-              <div>
-                <p className="text-sm font-medium text-blue-900">Account Cost Information</p>
-                <p className="text-sm text-blue-800 mt-1">
-                  Each secondary account costs <strong>$50 per month</strong>. This will be added to your monthly subscription.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            {/* Name Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Full Name *
-              </label>
-              <input
-                type="text"
-                value={newSecondaryAccount.name}
-                onChange={(e) => setNewSecondaryAccount(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Enter full name"
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
-            </div>
-
-            {/* Role Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Role *
-              </label>
-              <input
-                type="text"
-                list="role-suggestions"
-                value={newSecondaryAccount.role}
-                onChange={(e) => setNewSecondaryAccount(prev => ({ ...prev, role: e.target.value }))}
-                placeholder="Enter or select a role"
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
-              <datalist id="role-suggestions">
-                {roleOptions.map(role => (
-                  <option key={role} value={role} />
-                ))}
-              </datalist>
-              <p className="text-xs text-gray-500 mt-2">
-                Select from suggestions or enter a custom role
-              </p>
-            </div>
-
-            {/* Email Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email *
-              </label>
-              <input
-                type="email"
-                value={newSecondaryAccount.email}
-                onChange={(e) => setNewSecondaryAccount(prev => ({ ...prev, email: e.target.value }))}
-                placeholder="Enter email address"
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
-            </div>
-
-            {/* Permission Settings */}
-            <div className="bg-gray-50 rounded-lg p-4 space-y-4">
-              <h6 className="font-medium text-gray-800 text-sm">Account Permissions</h6>
-
-              {/* Merge and Link Appointments */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-700">Merge and Link Appointments</p>
-                  <p className="text-xs text-gray-500">Can merge duplicate appointments and link consults to appointments.</p>
-                </div>
-                <div
-                  className={`relative w-12 h-7 rounded-full cursor-pointer transition-colors duration-300 ${
-                    newSecondaryAccount.permissions.mergeAndLinkAppointments ? 'bg-green-500' : 'bg-gray-300'
-                  }`}
-                  onClick={() => updateSecondaryPermission('mergeAndLinkAppointments', !newSecondaryAccount.permissions.mergeAndLinkAppointments)}
-                >
-                  <div
-                    className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
-                      newSecondaryAccount.permissions.mergeAndLinkAppointments ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Create Consults */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-700">Create Consults</p>
-                  <p className="text-xs text-gray-500">Create consult cards. Create recordings and upload docs.</p>
-                </div>
-                <div
-                  className={`relative w-12 h-7 rounded-full cursor-pointer transition-colors duration-300 ${
-                    newSecondaryAccount.permissions.createConsults ? 'bg-green-500' : 'bg-gray-300'
-                  }`}
-                  onClick={() => updateSecondaryPermission('createConsults', !newSecondaryAccount.permissions.createConsults)}
-                >
-                  <div
-                    className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
-                      newSecondaryAccount.permissions.createConsults ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Can Generate Notes */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-700">Can Generate Notes</p>
-                  <p className="text-xs text-gray-500">Can generate notes from consults</p>
-                </div>
-                <div
-                  className={`relative w-12 h-7 rounded-full cursor-pointer transition-colors duration-300 ${
-                    newSecondaryAccount.permissions.canGenerateNotes ? 'bg-green-500' : 'bg-gray-300'
-                  }`}
-                  onClick={() => updateSecondaryPermission('canGenerateNotes', !newSecondaryAccount.permissions.canGenerateNotes)}
-                >
-                  <div
-                    className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
-                      newSecondaryAccount.permissions.canGenerateNotes ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Edit Generated Notes */}
-              <div className={`flex items-center justify-between ${!isPermissionEnabled('editGeneratedNotes') ? 'opacity-50' : ''}`}>
-                <div>
-                  <p className="font-medium text-gray-700">Edit Generated Notes</p>
-                  <p className="text-xs text-gray-500">Can Modify Generated notes</p>
-                </div>
-                <div
-                  className={`relative w-12 h-7 rounded-full transition-colors duration-300 ${
-                    isPermissionEnabled('editGeneratedNotes')
-                      ? 'cursor-pointer' + (newSecondaryAccount.permissions.editGeneratedNotes ? ' bg-green-500' : ' bg-gray-300')
-                      : 'cursor-not-allowed bg-gray-300'
-                  }`}
-                  onClick={() => isPermissionEnabled('editGeneratedNotes') && updateSecondaryPermission('editGeneratedNotes', !newSecondaryAccount.permissions.editGeneratedNotes)}
-                >
-                  <div
-                    className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
-                      newSecondaryAccount.permissions.editGeneratedNotes && isPermissionEnabled('editGeneratedNotes') ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Push to EHR */}
-              <div className={`flex items-center justify-between ${!isPermissionEnabled('pushToEHR') ? 'opacity-50' : ''}`}>
-                <div>
-                  <p className="font-medium text-gray-700">Push to EHR</p>
-                  <p className="text-xs text-gray-500">Can push generated notes to EHR</p>
-                </div>
-                <div
-                  className={`relative w-12 h-7 rounded-full transition-colors duration-300 ${
-                    isPermissionEnabled('pushToEHR')
-                      ? 'cursor-pointer' + (newSecondaryAccount.permissions.pushToEHR ? ' bg-green-500' : ' bg-gray-300')
-                      : 'cursor-not-allowed bg-gray-300'
-                  }`}
-                  onClick={() => isPermissionEnabled('pushToEHR') && updateSecondaryPermission('pushToEHR', !newSecondaryAccount.permissions.pushToEHR)}
-                >
-                  <div
-                    className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
-                      newSecondaryAccount.permissions.pushToEHR && isPermissionEnabled('pushToEHR') ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-200">
-                <strong>Dependencies:</strong> Edit Generated Notes requires "Can Generate Notes". Push to EHR requires both "Can Generate Notes" and "Edit Generated Notes".
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3 justify-end mt-6">
-            <button
-              onClick={() => setShowAddSecondaryAccountModal(false)}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleAddAccount}
-              disabled={!newSecondaryAccount.name || !newSecondaryAccount.role || !newSecondaryAccount.email}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                newSecondaryAccount.name && newSecondaryAccount.role && newSecondaryAccount.email
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              Add Account
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Add User Type Selection Modal
-  const AddUserTypeModal = () => {
-    if (!showAddUserTypeModal) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Add New User</h3>
-            <button onClick={() => setShowAddUserTypeModal(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <p className="text-sm text-gray-600 mb-6">Select the type of account you want to create:</p>
-
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                setShowAddUserTypeModal(false);
-                setShowAddPrimaryAccountModal(true);
-              }}
-              className="w-full flex items-start gap-4 p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all group"
-            >
-              <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-500 transition-colors">
-                <Users className="w-5 h-5 text-blue-600 group-hover:text-white" />
-              </div>
-              <div className="text-left">
-                <h4 className="font-semibold text-gray-900 mb-1">Primary Account (Doctor)</h4>
-                <p className="text-xs text-gray-600">Add a new doctor to the practice. Request new account or copy settings from existing doctor.</p>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                setShowAddUserTypeModal(false);
-                setShowAddSecondaryAccountModal(true);
-              }}
-              className="w-full flex items-start gap-4 p-4 border-2 border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-all group"
-            >
-              <div className="flex-shrink-0 w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-500 transition-colors">
-                <Users className="w-5 h-5 text-purple-600 group-hover:text-white" />
-              </div>
-              <div className="text-left">
-                <h4 className="font-semibold text-gray-900 mb-1">Secondary Account (Staff)</h4>
-                <p className="text-xs text-gray-600">Add a nurse, assistant, or other staff member with customizable permissions.</p>
-              </div>
-            </button>
-          </div>
-
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={() => setShowAddUserTypeModal(false)}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Add Primary Account Modal
-  const AddPrimaryAccountModal = () => {
-    if (!showAddPrimaryAccountModal) return null;
-
-    const primaryDoctors = allUsers.filter(user => user.type === 'primary');
-
-    const handleAddPrimaryAccount = () => {
-      if (!newPrimaryAccount.name || !newPrimaryAccount.specialty || !newPrimaryAccount.email) return;
-
-      // Create new primary account
-      const newAccount = {
-        id: `doctor${Date.now()}`,
-        name: newPrimaryAccount.name,
-        type: 'primary',
-        specialty: newPrimaryAccount.specialty,
-        email: newPrimaryAccount.email,
-        linkedAccounts: []
-      };
-
-      // If copying from another doctor, copy their settings
-      if (primaryAccountType === 'copy' && copyFromDoctorId) {
-        // Here you would copy all templates and settings from the selected doctor
-        console.log(`Copying settings from doctor ${copyFromDoctorId} to new account`);
-        // In a real implementation, you'd copy all user-specific overrides
-      }
-
-      setAllUsers(prev => [...prev, newAccount]);
-
-      // Reset form
-      setShowAddPrimaryAccountModal(false);
-      setPrimaryAccountType('');
-      setCopyFromDoctorId('');
-      setNewPrimaryAccount({
-        name: '',
-        specialty: '',
-        email: ''
-      });
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Add Primary Account (Doctor)</h3>
-            <button onClick={() => {
-              setShowAddPrimaryAccountModal(false);
-              setPrimaryAccountType('');
-              setCopyFromDoctorId('');
-            }} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            {/* Account Type Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Account Setup Method *
-              </label>
-              <div className="space-y-3">
-                <button
-                  onClick={() => setPrimaryAccountType('request')}
-                  className={`w-full flex items-start gap-3 p-4 border-2 rounded-lg transition-all ${
-                    primaryAccountType === 'request'
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex-shrink-0">
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                      primaryAccountType === 'request' ? 'border-blue-500' : 'border-gray-300'
-                    }`}>
-                      {primaryAccountType === 'request' && (
-                        <div className="w-3 h-3 rounded-full bg-blue-500" />
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-left">
-                    <h4 className="font-medium text-gray-900">Request New Account</h4>
-                    <p className="text-xs text-gray-600 mt-1">Create a brand new account with default settings and templates</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setPrimaryAccountType('copy')}
-                  className={`w-full flex items-start gap-3 p-4 border-2 rounded-lg transition-all ${
-                    primaryAccountType === 'copy'
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex-shrink-0">
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                      primaryAccountType === 'copy' ? 'border-blue-500' : 'border-gray-300'
-                    }`}>
-                      {primaryAccountType === 'copy' && (
-                        <div className="w-3 h-3 rounded-full bg-blue-500" />
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-left">
-                    <h4 className="font-medium text-gray-900">Copy from Existing Doctor</h4>
-                    <p className="text-xs text-gray-600 mt-1">Copy all settings, templates, and configurations from another doctor in your practice</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Copy From Doctor Dropdown - Only show if 'copy' is selected */}
-            {primaryAccountType === 'copy' && (
-              <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Doctor to Copy From *
-                </label>
-                <select
-                  value={copyFromDoctorId}
-                  onChange={(e) => setCopyFromDoctorId(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 16px center',
-                    paddingRight: '48px'
-                  }}
-                >
-                  <option value="">Select a doctor...</option>
-                  {primaryDoctors.map(doctor => (
-                    <option key={doctor.id} value={doctor.id}>
-                      {doctor.name} - {doctor.specialty}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-blue-700 mt-2">
-                  All settings, templates, and configurations will be copied from the selected doctor to the new account.
-                </p>
-              </div>
-            )}
-
-            {/* Doctor Details */}
-            {primaryAccountType && (
-              <div className="space-y-4 pt-4 border-t border-gray-200">
-                <h4 className="font-medium text-gray-900">Doctor Information</h4>
-
-                {/* Name Input */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={newPrimaryAccount.name}
-                    onChange={(e) => setNewPrimaryAccount(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="Enter full name"
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  />
-                </div>
-
-                {/* Specialty Input */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Specialty *
-                  </label>
-                  <input
-                    type="text"
-                    value={newPrimaryAccount.specialty}
-                    onChange={(e) => setNewPrimaryAccount(prev => ({ ...prev, specialty: e.target.value }))}
-                    placeholder="Enter specialty"
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  />
-                </div>
-
-                {/* Email Input */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email *
-                  </label>
-                  <input
-                    type="email"
-                    value={newPrimaryAccount.email}
-                    onChange={(e) => setNewPrimaryAccount(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="Enter email address"
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3 justify-end mt-6">
-            <button
-              onClick={() => {
-                setShowAddPrimaryAccountModal(false);
-                setPrimaryAccountType('');
-                setCopyFromDoctorId('');
-              }}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleAddPrimaryAccount}
-              disabled={
-                !primaryAccountType ||
-                !newPrimaryAccount.name ||
-                !newPrimaryAccount.specialty ||
-                !newPrimaryAccount.email ||
-                (primaryAccountType === 'copy' && !copyFromDoctorId)
-              }
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                primaryAccountType &&
-                newPrimaryAccount.name &&
-                newPrimaryAccount.specialty &&
-                newPrimaryAccount.email &&
-                (primaryAccountType !== 'copy' || copyFromDoctorId)
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              Add Doctor
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const LinkAccountModal = () => {
-    const seededSecondaryCandidates = [
-      { id: 'nurse1', name: 'Lisa Parker, RN', role: 'Cardiology Nurse', email: 'lisa.parker@clinic.com', type: 'secondary' },
-      { id: 'nurse2', name: 'Michael Torres, RN', role: 'ICU Nurse', email: 'michael.torres@clinic.com', type: 'secondary' },
-      { id: 'nurse3', name: 'Sarah Kim, RN', role: 'Pediatric Nurse', email: 'sarah.kim@clinic.com', type: 'secondary' },
-      { id: 'assistant1', name: 'Jennifer Walsh', role: 'Medical Assistant', email: 'jennifer.walsh@clinic.com', type: 'secondary' },
-      { id: 'assistant2', name: 'David Chen', role: 'Clinical Assistant', email: 'david.chen@clinic.com', type: 'secondary' },
-      { id: 'assistant3', name: 'Maria Rodriguez', role: 'Administrative Assistant', email: 'maria.rodriguez@clinic.com', type: 'secondary' },
-      { id: 'pa1', name: 'Dr. Amanda Foster, PA-C', role: 'Physician Assistant', email: 'amanda.foster@clinic.com', type: 'secondary' },
-      { id: 'np1', name: 'Dr. Robert Taylor, NP', role: 'Nurse Practitioner', email: 'robert.taylor@clinic.com', type: 'secondary' },
-      { id: 'tech1', name: 'Alex Johnson', role: 'Medical Technician', email: 'alex.johnson@clinic.com', type: 'secondary' },
-      { id: 'tech2', name: 'Emily Brown', role: 'Lab Technician', email: 'emily.brown@clinic.com', type: 'secondary' }
-    ];
-
-    const userCandidatesFromDirectory = allUsers
-      .filter((u) => u.id !== selectedUser?.id)
-      .map((u) => ({
-        id: u.id,
-        name: u.name,
-        role: u.type === 'primary' ? `Doctor (${u.specialty || 'General'})` : (u.role || 'Secondary'),
-        email: u.email,
-        type: u.type
-      }));
-
-    const dedupe = new Map();
-    [...userCandidatesFromDirectory, ...seededSecondaryCandidates].forEach((u) => {
-      if (!dedupe.has(String(u.id))) dedupe.set(String(u.id), u);
+  const handleSaveLinkedAssignment = () => {
+    if (!selectedLinkedAssignmentUser) return;
+
+    const hasDuplicateAssignment = isDuplicateAssignment(linkedAccounts, {
+      assigneeUserId: selectedLinkedAssignmentUser.id,
+      doctorId: selectedUser.id,
+      assignmentType: newLinkAssignmentType,
     });
-    const availableUsers = Array.from(dedupe.values());
 
-    const selectedUserData = availableUsers.find((u) => String(u.id) === String(selectedNewUser));
+    if (hasDuplicateAssignment) {
+      setLinkDateError('This assignment already exists for the selected user and doctor.');
+      return;
+    }
 
-    const handleLinkAccount = () => {
-      if (!selectedUserData) return;
+    const newAccount = createLinkedAssignmentRecord({
+      assigneeUser: selectedLinkedAssignmentUser,
+      assignmentType: newLinkAssignmentType,
+      permissions: newUserPermissions,
+      doctorId: selectedUser.id,
+      doctorName: selectedUser.name,
+    });
 
-      const hasDuplicateAssignment = linkedAccounts.some((link) => {
-        const existingAssigneeId = getAssignmentAssigneeId(link);
-        const isSameAssignee = existingAssigneeId === String(selectedUserData.id);
-        const isSameDoctor = String(link.linkedToDoctorId) === String(selectedUser.id);
-        const existingType = getAssignmentType(link);
-        const isSameAssignmentType = existingType === newLinkAssignmentType;
-        return isSameAssignee && isSameDoctor && isSameAssignmentType;
-      });
+    setLinkedAccounts((prev) => [...prev, newAccount]);
+    setShowLinkAccountModal(false);
+    setSelectedNewUser('');
+    setNewLinkAssignmentType('assistant');
+    setLinkDateError('');
+    setNewUserPermissions({
+      createConsults: true,
+      mergeAndLinkAppointments: false,
+      canGenerateNotes: false,
+      editGeneratedNotes: false,
+      pushToEHR: false
+    });
+  };
 
-      if (hasDuplicateAssignment) {
-        setLinkDateError('This assignment already exists for the selected user and doctor.');
-        return;
+  const updateSecondaryPermission = (permission, value) => {
+    setNewSecondaryAccount((prev) => {
+      const updated = { ...prev, permissions: { ...prev.permissions, [permission]: value } };
+
+      if (permission === 'canGenerateNotes' && !value) {
+        updated.permissions.editGeneratedNotes = false;
+        updated.permissions.pushToEHR = false;
+      } else if (permission === 'editGeneratedNotes' && !value) {
+        updated.permissions.pushToEHR = false;
       }
 
-      const newAccount = {
-        linkId: `link_${Date.now()}`,
-        assigneeUserId: selectedUserData.id,
-        assigneeType: selectedUserData.type || 'secondary',
-        assignmentType: newLinkAssignmentType,
-        name: selectedUserData.name,
-        role: selectedUserData.role,
-        email: selectedUserData.email,
-        permissions: { ...newUserPermissions },
-        linkedToDoctorId: selectedUser.id,
-        linkedToDoctorName: selectedUser.name
-      };
+      return updated;
+    });
+  };
 
-      setLinkedAccounts(prev => [...prev, newAccount]);
-      setShowLinkAccountModal(false);
-      setSelectedNewUser('');
-      setNewLinkAssignmentType('assistant');
-      setLinkDateError('');
-      setNewUserPermissions({
+  const isSecondaryPermissionEnabled = (permission) => {
+    switch (permission) {
+      case 'createConsults':
+      case 'canGenerateNotes':
+      case 'mergeAndLinkAppointments':
+        return true;
+      case 'editGeneratedNotes':
+        return newSecondaryAccount.permissions.canGenerateNotes;
+      case 'pushToEHR':
+        return newSecondaryAccount.permissions.canGenerateNotes && newSecondaryAccount.permissions.editGeneratedNotes;
+      default:
+        return false;
+    }
+  };
+
+  const handleAddSecondaryAccount = () => {
+    if (!newSecondaryAccount.name || !newSecondaryAccount.role || !newSecondaryAccount.email) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    const newAccount = {
+      id: `sec${Date.now()}`,
+      name: newSecondaryAccount.name,
+      type: 'secondary',
+      role: newSecondaryAccount.role,
+      email: newSecondaryAccount.email,
+      permissions: { ...newSecondaryAccount.permissions }
+    };
+
+    setAllUsers((prev) => [...prev, newAccount]);
+    setShowAddSecondaryAccountModal(false);
+    setNewSecondaryAccount({
+      name: '',
+      role: '',
+      email: '',
+      permissions: {
         createConsults: true,
-        mergeAndLinkAppointments: false,
         canGenerateNotes: false,
         editGeneratedNotes: false,
         pushToEHR: false
-      });
-    };
-
-    if (!showLinkAccountModal) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Add Linked Assignment</h3>
-            <button onClick={() => {
-              setShowLinkAccountModal(false);
-              setLinkDateError('');
-            }} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          
-          <div className="space-y-6">
-            {/* Select assignee first */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select assignee (Primary or Secondary)
-              </label>
-              <select
-                value={selectedNewUser}
-                onChange={(e) => {
-                  setSelectedNewUser(e.target.value);
-                  setLinkDateError('');
-                }}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 16px center',
-                  paddingRight: '48px'
-                }}
-              >
-                <option value="">Select a user...</option>
-                {availableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name} - {user.role} ({user.type === 'primary' ? 'Primary' : 'Secondary'})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Then choose assignment type */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Assignment type
-              </label>
-              <select
-                value={newLinkAssignmentType}
-                onChange={(e) => {
-                  setNewLinkAssignmentType(e.target.value);
-                  setLinkDateError('');
-                }}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
-              >
-                <option value="assistant">Acts as MA / Assistant</option>
-                <option value="coverage">Doctor Coverage</option>
-              </select>
-            </div>
-
-            {selectedUserData && (
-              <div className="border border-gray-200 rounded-lg p-4">
-                <div className="mb-4">
-                  <p className="font-semibold text-gray-900">{selectedUserData.name}</p>
-                  <p className="text-sm text-gray-600">
-                    {selectedUserData.role} • {selectedUserData.email} • {selectedUserData.type === 'primary' ? 'Primary' : 'Secondary'}
-                  </p>
-                </div>
-
-              </div>
-            )}
-            {linkDateError && (
-              <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                {linkDateError}
-              </div>
-            )}
-          </div>
-          
-          <div className="flex gap-3 justify-end mt-6">
-            <button
-              onClick={() => {
-                setShowLinkAccountModal(false);
-                setLinkDateError('');
-              }}
-              className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleLinkAccount}
-              disabled={!selectedUserData}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                selectedUserData
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              }`}
-            >
-              Save Assignment
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+      }
+    });
   };
 
-  // Setting Row Component
-  const SettingRow = ({ setting, moduleId, showUserOverride = false, userId = null }) => {
-    const isEnabled = isSettingEnabled(setting);
-    const availableOptions = getAvailableOptions(setting);
+  const handleAddPrimaryAccount = () => {
+    if (!newPrimaryAccount.name || !newPrimaryAccount.specialty || !newPrimaryAccount.email) return;
 
-    // Ops inheritance: for PM default view, Ops can hide/lock settings
-    const isPMDefaultView = !isMasterUser() && !showUserOverride;
-    const parentSetting = setting.dependency ? getSettingById(setting.dependency) : null;
-    const parentHiddenByOps = isPMDefaultView && parentSetting && !canPMSeeSetting(parentSetting);
-    const parentLockedByOps = isPMDefaultView && parentSetting && !canPMEditSetting(parentSetting);
-
-    const isPMHiddenByOps = isPMDefaultView && (!canPMSeeSetting(setting) || parentHiddenByOps);
-    const isPMLockedByOps = isPMDefaultView && (!canPMEditSetting(setting) || parentLockedByOps);
-
-    if (isPMHiddenByOps) return null;
-
-    // Get user-specific setting if it exists
-    const userSetting = userId ? getUserSetting(userId, moduleId, setting.id) : null;
-    const hasUserOverride = userSetting && userSetting.value !== undefined;
-    const userLockState = userSetting?.pmLockState || setting.pmLockState;
-    const effectiveValue = hasUserOverride ? userSetting.value : setting.default;
-    
-    const getDisplaySubtext = () => {
-      if (setting.subtexts && setting.default) {
-        return setting.subtexts[setting.default] || setting.subtext || '';
-      }
-      return setting.subtext || '';
+    const newAccount = {
+      id: `doctor${Date.now()}`,
+      name: newPrimaryAccount.name,
+      type: 'primary',
+      specialty: newPrimaryAccount.specialty,
+      email: newPrimaryAccount.email,
+      linkedAccounts: []
     };
 
-    const renderFormControl = (isUserOverride = false, targetUserId = null) => {
-      const value = isUserOverride ? effectiveValue : setting.default;
-      // Check if default setting is locked-hidden (disable default controls, but not overrides)
-      const isDefaultLockedHidden = !isUserOverride && setting.pmLockState === 'locked-hidden';
-      const isDefaultLockedByOpsForPM = !isUserOverride && isPMLockedByOps;
-      const isDefaultReadOnly = isDefaultLockedHidden || isDefaultLockedByOpsForPM || (!isUserOverride && !isEnabled);
+    if (primaryAccountType === 'copy' && copyFromDoctorId) {
+      console.log(`Copying settings from doctor ${copyFromDoctorId} to new account`);
+    }
 
-      const handleChange = (newValue) => {
-        // Ops inheritance: PM cannot edit defaults for ops-locked settings
-        if (!isUserOverride && isPMLockedByOps) return;
-        if (isDefaultLockedHidden) return; // Prevent changes to locked-hidden defaults
-        if (!isUserOverride && !isEnabled) return; // Prevent changes when dependency disabled
-
-        if (isUserOverride && targetUserId) {
-          // Check if the resulting override would match BOTH default value and lock state
-          const wouldMatchDefault = doesOverrideMatchDefault(targetUserId, moduleId, setting.id, newValue, undefined);
-
-          if (wouldMatchDefault) {
-            // Cannot create an override that matches the default set
-            const currentLockState = getUserSetting(targetUserId, moduleId, setting.id)?.pmLockState || setting.pmLockState;
-            alert(getMatchingOverrideAlertMessage(newValue, currentLockState));
-            return;
-          }
-
-          // Check if this is a new override or if the value is different from practice default
-          const currentUserSetting = getUserSetting(targetUserId, moduleId, setting.id);
-          const isDifferentFromDefault = !valuesAreEqual(newValue, setting.default);
-
-          if (isDifferentFromDefault) {
-            // Value differs from default, show confirmation modal
-            setPendingSettingChange({
-              userId: targetUserId,
-              moduleId,
-              settingId: setting.id,
-              settingName: setting.name,
-              newValue,
-              defaultValue: setting.default
-            });
-            setShowOverrideConfirmModal(true);
-          } else {
-            // Value matches default - check if we should remove the override entirely
-            if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.pmLockState !== undefined)) {
-              // User had an override, now setting value back to default
-              // If lock state also matches default, remove entire override
-              const lockStateMatchesDefault = (currentUserSetting.pmLockState === undefined || currentUserSetting.pmLockState === setting.pmLockState);
-              if (lockStateMatchesDefault) {
-                // Both match, remove entire override
-                removeUserSetting(targetUserId, moduleId, setting.id);
-              } else {
-                // Lock differs, keep override but update value
-                setUserSetting(targetUserId, moduleId, setting.id, 'value', newValue);
-              }
-            }
-            // If no override exists and value = default, do nothing (stay at default)
-          }
-        } else {
-          updateSettingState(moduleId, setting.id, 'default', newValue);
-        }
-      };
-      
-      switch (setting.type) {
-        case 'toggle':
-          const isToggleOn = value === 'True';
-          const isToggleDisabled = !isEnabled || isDefaultReadOnly;
-          return (
-            <div
-              className={`relative w-12 h-7 rounded-full transition-colors duration-300 ${
-                isToggleOn ? 'bg-green-500' : 'bg-gray-300'
-              } ${isToggleDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              onClick={() => {
-                if (isToggleDisabled) return;
-
-                if (setting.requiresAttestation && !isToggleOn && !isUserOverride) {
-                  setShowEmailModal(true);
-                } else {
-                  const newValue = isToggleOn ? 'False' : 'True';
-                  handleChange(newValue);
-                }
-              }}
-            >
-              <div
-                className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
-                  isToggleOn ? 'translate-x-5' : 'translate-x-0.5'
-                }`}
-              />
-            </div>
-          );
-
-        case 'range-selector':
-          return (
-            <div className="space-y-4">
-              <select
-                value={value}
-                onChange={(e) => handleChange(e.target.value)}
-                disabled={isDefaultReadOnly}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 16px center',
-                  paddingRight: '48px'
-                }}
-              >
-                {setting.options.map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-              <div className="text-sm text-gray-500">
-                Current range: Today to {value === '1 day' ? 'Tomorrow' : `${value} from today`}
-              </div>
-            </div>
-          );
-
-        case 'order-list':
-          const orderItems = Array.isArray(value) ? value : setting.default;
-          return (
-            <div className="space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg border">
-                <p className="text-sm text-gray-600 mb-3">Drag to reorder appointment display</p>
-                <div className="space-y-2">
-                  {orderItems.map((item, index) => (
-                    <div key={item} className="flex items-center gap-3 p-3 bg-white rounded border hover:shadow-sm transition-shadow">
-                      <div className="cursor-move text-gray-400 hover:text-gray-600">
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z"/>
-                        </svg>
-                      </div>
-                      <span className="flex-1 font-medium">{item}</span>
-
-                      {/* Show days input for Future and Past */}
-                      {(item === 'Future' || item === 'Past') && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="1"
-                            max="30"
-                            value={item === 'Future' ? futureDays : pastDays}
-                            onChange={(e) => {
-                              if (isDefaultReadOnly) return;
-                              const days = parseInt(e.target.value) || 1;
-                              if (item === 'Future') {
-                                setFutureDays(days);
-                              } else {
-                                setPastDays(days);
-                              }
-                            }}
-                            disabled={isDefaultReadOnly}
-                            className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
-                          />
-                          <span className="text-xs text-gray-500">days</span>
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                          #{index + 1}
-                        </span>
-                        {index > 0 && (
-                          <button
-                            onClick={() => {
-                              if (isDefaultReadOnly) return;
-                              const newOrder = [...orderItems];
-                              [newOrder[index], newOrder[index - 1]] = [newOrder[index - 1], newOrder[index]];
-                              handleChange(newOrder);
-                            }}
-                            disabled={isDefaultReadOnly}
-                            className="text-gray-400 hover:text-blue-600 p-1"
-                            title="Move up"
-                          >
-                            ↑
-                          </button>
-                        )}
-                        {index < orderItems.length - 1 && (
-                          <button
-                            onClick={() => {
-                              if (isDefaultReadOnly) return;
-                              const newOrder = [...orderItems];
-                              [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
-                              handleChange(newOrder);
-                            }}
-                            disabled={isDefaultReadOnly}
-                            className="text-gray-400 hover:text-blue-600 p-1"
-                            title="Move down"
-                          >
-                            ↓
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3 text-xs text-gray-500">
-                  This order determines how appointments appear in the "Link Appointment" popup. For "Future" and "Past", specify how many days of appointments to display.
-                </div>
-              </div>
-            </div>
-          );
-
-        case 'time-multiselect':
-          const selectedTimes = Array.isArray(value) ? value : [];
-          const maxSelections = 6;
-
-          // For Daily appointment sync time (id 73 or 83), get options dynamically based on timezone
-          const timeOptions = (setting.id === 73 || setting.id === 83)
-            ? (() => {
-                const timezoneSetting = moduleSettings['controls']?.settings.find(s => s.id === 20);
-                const timezoneUserSetting = userId ? getUserSetting(userId, 'controls', 20) : null;
-                const currentTimezone = timezoneUserSetting?.value || timezoneSetting?.default || 'Eastern (America/New York)';
-                return getTimeOptionsForTimezone(currentTimezone);
-              })()
-            : setting.options;
-
-          return (
-            <div className="space-y-4">
-              <div className="text-sm text-gray-600 mb-2">
-                Select up to {maxSelections} sync times (selected: {selectedTimes.length}/{maxSelections})
-                {(setting.id === 73 || setting.id === 83) && (() => {
-                  const timezoneSetting = moduleSettings['controls']?.settings.find(s => s.id === 20);
-                  const timezoneUserSetting = userId ? getUserSetting(userId, 'controls', 20) : null;
-                  const currentTimezone = timezoneUserSetting?.value || timezoneSetting?.default || 'Eastern (America/New York)';
-                  const tzLabel = currentTimezone.match(/\((.*?)\)/)?.[1] || currentTimezone;
-                  return <span className="ml-2 text-xs text-gray-500">({tzLabel})</span>;
-                })()}
-              </div>
-
-              <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 border rounded-lg">
-                {timeOptions.map(time => {
-                  const isSelected = selectedTimes.includes(time);
-                  const canSelect = selectedTimes.length < maxSelections || isSelected;
-                  
-                  return (
-                    <label 
-                      key={time} 
-                      className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
-                        isSelected 
-                          ? 'bg-blue-100 text-blue-700 border border-blue-300' 
-                          : canSelect
-                            ? 'bg-gray-50 hover:bg-gray-100 border border-gray-200'
-                            : 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => {
-                          if (isDefaultReadOnly) return;
-                          if (!canSelect && !isSelected) return;
-                          
-                          let newTimes;
-                          if (e.target.checked) {
-                            newTimes = [...selectedTimes, time];
-                          } else {
-                            newTimes = selectedTimes.filter(t => t !== time);
-                          }
-                          updateSettingState(moduleId, setting.id, 'default', newTimes);
-                        }}
-                        className="w-3 h-3"
-                        disabled={isDefaultReadOnly || (!canSelect && !isSelected)}
-                      />
-                      <span className="text-xs">{time}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              
-              {selectedTimes.length > 0 && (
-                <div className="mt-3 p-3 bg-blue-50 border-l-4 border-blue-400 rounded">
-                  <div className="text-xs text-blue-700">
-                    Selected times: {selectedTimes.join(', ')}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-
-        case 'button':
-          return (
-            <div className="space-y-3">
-              <button
-                onClick={() => {
-                  // Simulate sync operation
-                  const button = document.querySelector(`#sync-btn-${setting.id}`);
-                  if (button) {
-                    button.textContent = 'Syncing...';
-                    button.disabled = true;
-                    setTimeout(() => {
-                      button.textContent = 'Sync Now';
-                      button.disabled = false;
-                      alert('EHR sync completed successfully!');
-                    }, 2000);
-                  }
-                }}
-                id={`sync-btn-${setting.id}`}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Sync Now
-              </button>
-              <div className="text-xs text-gray-500">
-                Last sync: Never
-              </div>
-            </div>
-          );
-
-        case 'service-settings-combined':
-          const enabledServices = Array.isArray(value) ? value : (setting.default || []);
-          const defaultService = isUserOverride
-            ? (userSetting?.defaultService || setting.defaultService)
-            : (setting.defaultService || enabledServices[0]);
-
-          const handleEnabledServicesChange = (service, isChecked) => {
-            let newEnabledServices;
-            if (isChecked) {
-              newEnabledServices = [...enabledServices, service];
-            } else {
-              // Don't allow unchecking if it's the last one or if it's the default
-              if (enabledServices.length === 1) return;
-              if (service === defaultService) {
-                alert('Cannot disable the default service. Please select a different default first.');
-                return;
-              }
-              newEnabledServices = enabledServices.filter(s => s !== service);
-            }
-
-            if (isUserOverride && targetUserId) {
-              setUserSetting(targetUserId, moduleId, setting.id, 'value', newEnabledServices);
-            } else {
-              // Edge case handling (Option A): if a service is disabled at practice level, repair any overrides referencing it
-              if (!isChecked && setting.id === 41) {
-                const removedService = service;
-                const nextPracticeEnabledServices = newEnabledServices;
-                const practiceDefaultService = setting.defaultService || nextPracticeEnabledServices[0];
-
-                const impactedUsers = [];
-                const suffix = `-${moduleId}-${setting.id}`;
-                Object.keys(userSettingsOverrides).forEach((key) => {
-                  if (!key.endsWith(suffix)) return;
-                  const userId = key.slice(0, -suffix.length);
-                  const override = userSettingsOverrides[key];
-                  if (!override) return;
-
-                  const user = allUsers.find(u => u.id.toString() === userId);
-                  const userName = user?.name || `User ${userId}`;
-
-                  const hasEnabledOverride = Array.isArray(override.value);
-                  const oldEnabledServices = hasEnabledOverride ? override.value : enabledServices;
-                  const newUserEnabledServices = oldEnabledServices.filter(s => nextPracticeEnabledServices.includes(s));
-                  const repairedEnabledServices = newUserEnabledServices.length > 0 ? newUserEnabledServices : [nextPracticeEnabledServices[0]];
-
-                  const hasDefaultServiceOverride = typeof override.defaultService === 'string' && override.defaultService.length > 0;
-                  const oldDefaultService = hasDefaultServiceOverride ? override.defaultService : (practiceDefaultService || repairedEnabledServices[0]);
-                  const newDefaultService = repairedEnabledServices.includes(oldDefaultService) ? oldDefaultService : repairedEnabledServices[0];
-
-                  const referencesRemovedService =
-                    oldEnabledServices.includes(removedService) || oldDefaultService === removedService;
-                  const enabledServicesChanged = oldEnabledServices.join('|') !== repairedEnabledServices.join('|');
-                  const defaultServiceChanged = oldDefaultService !== newDefaultService;
-
-                  if (!referencesRemovedService && !enabledServicesChanged && !defaultServiceChanged) return;
-
-                  impactedUsers.push({
-                    userId,
-                    userName,
-                    oldEnabledServices,
-                    newEnabledServices: repairedEnabledServices,
-                    oldDefaultService,
-                    newDefaultService,
-                    shouldUpdateEnabledServices: hasEnabledOverride && enabledServicesChanged,
-                    shouldUpdateDefaultService: hasDefaultServiceOverride && defaultServiceChanged
-                  });
-                });
-
-                if (impactedUsers.length > 0) {
-                  setServiceDisableRepairData({
-                    moduleId,
-                    settingId: setting.id,
-                    removedService,
-                    currentPracticeDefaultService: practiceDefaultService,
-                    newEnabledServices: nextPracticeEnabledServices,
-                    impactedUsers
-                  });
-                  setShowServiceDisableRepairModal(true);
-                  return;
-                }
-              }
-
-              updateSettingState(moduleId, setting.id, 'default', newEnabledServices);
-            }
-          };
-
-          const handleDefaultServiceChange = (newDefault) => {
-            if (isUserOverride && targetUserId) {
-              setUserSetting(targetUserId, moduleId, setting.id, 'defaultService', newDefault);
-            } else {
-              updateSettingState(moduleId, setting.id, 'defaultService', newDefault);
-            }
-          };
-
-          return (
-            <div className="space-y-4">
-              {/* Enabled Services Section */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Enabled Service Settings
-                </label>
-                <div className="space-y-2 border rounded-lg p-3 bg-gray-50">
-                  {setting.options.map(service => {
-                    const isEnabled = enabledServices.includes(service);
-                    const isDefault = service === defaultService;
-
-                    return (
-                      <label
-                        key={service}
-                        className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
-                          isEnabled
-                            ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                            : 'bg-white hover:bg-gray-100 border border-gray-200'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          onChange={(e) => handleEnabledServicesChange(service, e.target.checked)}
-                          disabled={isDefaultLockedHidden || (isDefault && enabledServices.length === 1)}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm flex-1">{service}</span>
-                        {isDefault && (
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                            Default
-                          </span>
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  At least one service must be enabled. Selected: {enabledServices.length}
-                </p>
-              </div>
-
-              {/* Default Service Section */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Default Service Setting
-                </label>
-                <select
-                  value={defaultService}
-                  onChange={(e) => handleDefaultServiceChange(e.target.value)}
-                  disabled={isDefaultReadOnly}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none bg-white hover:border-blue-300"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 16px center',
-                    paddingRight: '48px'
-                  }}
-                >
-                  {enabledServices.map(service => (
-                    <option key={service} value={service}>{service}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Default service must be one of the enabled services
-                </p>
-              </div>
-            </div>
-          );
-
-        case 'dropdown':
-          const dropdownOptions = setting.dependency === 41 ? availableOptions : setting.options;
-          // Ensure the current value is in the available options for dependent dropdowns
-          const needsDefaultUpdate = setting.dependency === 41 && !availableOptions.includes(value) && availableOptions.length > 0;
-
-          // Check if this is Delete Consults setting and Custom is selected
-          const isDeleteConsults = setting.id === 25;
-          const isCustomSelected = value === 'Custom' || (value && value.startsWith('Custom:'));
-
-          return (
-            <div className="space-y-3">
-              <select
-                value={isCustomSelected ? 'Custom' : (needsDefaultUpdate ? availableOptions[0] : value)}
-                onChange={(e) => {
-                  if (e.target.value === 'Custom' && isDeleteConsults) {
-                    // Don't change yet, wait for custom input
-                    setCustomDeleteDays('');
-                  } else {
-                    handleChange(e.target.value);
-                  }
-                }}
-                disabled={isDefaultReadOnly}
-                className={`w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors appearance-none ${
-                  isDefaultReadOnly ? 'bg-gray-100 cursor-not-allowed opacity-60' : 'bg-white hover:border-blue-300'
-                }`}
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%232c3e50' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 16px center',
-                  paddingRight: '48px'
-                }}
-              >
-                {dropdownOptions.map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-
-              {/* Show custom days input for Delete Consults when Custom is selected */}
-              {isDeleteConsults && isCustomSelected && (
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Enter number of days"
-                    value={isCustomSelected && value.startsWith('Custom:') ? value.split(':')[1].trim().split(' ')[0] : customDeleteDays}
-                    onChange={(e) => setCustomDeleteDays(e.target.value)}
-                    className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    disabled={isDefaultReadOnly}
-                  />
-                  <button
-                    onClick={() => {
-                      if (customDeleteDays && parseInt(customDeleteDays) > 0) {
-                        handleChange(`Custom: ${customDeleteDays} days`);
-                      }
-                    }}
-                    disabled={!customDeleteDays || parseInt(customDeleteDays) <= 0 || isDefaultReadOnly}
-                    className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
-                  >
-                    Apply
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        
-        case 'multiselect':
-          const selectedValues = Array.isArray(value) ? value : [value];
-          return (
-            <div className="space-y-3">
-              {setting.options.map(option => {
-                const isChecked = selectedValues.includes(option);
-                const canUncheck = selectedValues.length > 1 || !isChecked;
-                const isDefault = setting.id === 41 && getSetting(moduleId, 42)?.default === option;
-                const isDisabled = isDefaultReadOnly || !isEnabled || (isDefault && isChecked); // Disable if it's the default option
-
-                return (
-                  <label key={option} className={`flex items-center gap-3 ${isDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}>
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={(e) => {
-                        if (isDefaultReadOnly) return;
-                        if (!canUncheck && !e.target.checked) {
-                          return; // Prevent unchecking last item
-                        }
-                        if (isDefault && !e.target.checked) {
-                          return; // Prevent unchecking default service
-                        }
-
-                        let newValues;
-                        if (e.target.checked) {
-                          newValues = [...selectedValues, option];
-                        } else {
-                          newValues = selectedValues.filter(v => v !== option);
-                        }
-                        updateSettingState(moduleId, setting.id, 'default', newValues);
-                      }}
-                      className="w-4 h-4 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500"
-                      disabled={isDisabled}
-                    />
-                    <span className="text-sm text-gray-700">{option}</span>
-                    {isDefault && (
-                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Default</span>
-                    )}
-                  </label>
-                );
-              })}
-              {selectedValues.length > 0 && (
-                <div className="mt-3 p-3 bg-blue-50 border-l-4 border-blue-400 rounded">
-                  <div className="text-xs text-blue-700">
-                    Selected: {selectedValues.join(', ')}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        
-        case 'link':
-          return (
-            <input
-              type="url"
-              placeholder="Enter URL"
-              value={value}
-              disabled={isDefaultReadOnly}
-              onChange={(e) => {
-                if (isDefaultReadOnly) return;
-                updateSettingState(moduleId, setting.id, 'default', e.target.value);
-              }}
-              className={`w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors hover:border-blue-300 ${
-                isDefaultReadOnly ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''
-              }`}
-            />
-          );
-
-        case 'google-signin':
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center gap-4">
-                {isGoogleSignedIn ? (
-                  <>
-                    <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg">
-                      <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="text-sm font-medium text-green-800">Connected to Google Calendar</span>
-                    </div>
-                    <button
-                      onClick={() => setShowGoogleSignoutModal(true)}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-                    >
-                      Sign Out
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => {
-                      if (isDefaultReadOnly) return;
-                      // Simulate Google sign-in
-                      setIsGoogleSignedIn(true);
-                      updateSettingState(moduleId, setting.id, 'default', true);
-                    }}
-                    disabled={isDefaultReadOnly}
-                    className="px-6 py-3 bg-white border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-3 shadow-sm"
-                  >
-                    <svg className="w-5 h-5" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                    </svg>
-                    Sign in with Google
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-
-        case 'zoom-check':
-          return (
-            <div className="space-y-4">
-              <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                <p className="text-sm text-blue-800">
-                  Connect the Marvix app via <a href="https://marketplace.zoom.us" target="_blank" rel="noopener noreferrer" className="underline font-medium hover:text-blue-900">Zoom Marketplace</a>
-                </p>
-              </div>
-            </div>
-          );
-
-        default:
-          return null;
-      }
-    };
-
-    return (
-      <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-8 mb-8 transition-all duration-200 hover:shadow-md ${
-        !isEnabled ? 'opacity-50' : ''
-      }`}>
-        <div className="flex items-start justify-between mb-6">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <h3 className="text-lg font-semibold text-gray-900">{setting.name}</h3>
-              {setting.required && <span className="text-red-500 text-sm font-medium">*</span>}
-              {isPMDefaultView && (
-                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                  Ops: {getOpsLockLabel(setting.opsLockState)}
-                </span>
-              )}
-              {(showUserOverride ? userLockState : setting.pmLockState) === 'locked-visible' && (
-                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
-                  🔒 Locked by Practice
-                </span>
-              )}
-              {(showUserOverride ? userLockState : setting.pmLockState) === 'locked-hidden' && (
-                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
-                  👁️‍🗨️ Hidden
-                </span>
-              )}
-              {showUserOverride && hasUserOverride && (
-                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200">
-                  ⚠️ Custom Value
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Show lock controls based on view and user role */}
-          {(currentView === 'settings' || showUserOverride) && (
-            <div className="flex items-center gap-2 ml-6">
-              <label className="text-xs font-medium text-gray-600 mr-2">
-                {isMasterUser() ? 'Ops Lock:' : 'Doctor Lock:'}
-              </label>
-              <select
-                value={showUserOverride ? userLockState : (isMasterUser() ? setting.opsLockState : setting.pmLockState)}
-                onChange={(e) => {
-                  if (!showUserOverride && !isEnabled) return;
-                  if (showUserOverride && userId) {
-                    const newLockState = e.target.value;
-
-                    // Check if the resulting override would match BOTH default value and lock state
-                    const wouldMatchDefault = doesOverrideMatchDefault(userId, moduleId, setting.id, undefined, newLockState);
-
-                    if (wouldMatchDefault) {
-                      // Cannot create an override that matches the default set
-                      const currentValue = getUserSetting(userId, moduleId, setting.id)?.value || setting.default;
-                      alert(getMatchingOverrideAlertMessage(currentValue, newLockState));
-                      return;
-                    }
-
-                    // Check if this is a new override or if the lock state is different from practice default
-                    const currentUserSetting = getUserSetting(userId, moduleId, setting.id);
-                    const isDifferentFromDefault = newLockState !== setting.pmLockState;
-
-                    if (isDifferentFromDefault) {
-                      // Lock state differs from default, show confirmation modal
-                      setPendingSettingChange({
-                        userId: userId,
-                        moduleId,
-                        settingId: setting.id,
-                        settingName: setting.name,
-                        newValue: newLockState,
-                        defaultValue: setting.pmLockState,
-                        isLockStateChange: true
-                      });
-                      setShowOverrideConfirmModal(true);
-                    } else {
-                      // Lock state matches default - check if we should remove the override entirely
-                      if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.pmLockState !== undefined)) {
-                        // User had an override, now setting lock state back to default
-                        // If value also matches default, remove entire override
-                        const currentValue = currentUserSetting.value !== undefined ? currentUserSetting.value : setting.default;
-                        const valueMatchesDefault = valuesAreEqual(currentValue, setting.default);
-
-                        if (valueMatchesDefault) {
-                          // Both match, remove entire override
-                          removeUserSetting(userId, moduleId, setting.id);
-                        } else {
-                          // Value differs, keep override but update lock state
-                          setUserSetting(userId, moduleId, setting.id, 'pmLockState', newLockState);
-                        }
-                      }
-                      // If no override exists and lock state = default, do nothing (stay at default)
-                    }
-                  } else {
-                    // Master user updates opsLockState, PM user updates pmLockState
-                    if (isPMLockedByOps) return;
-                    const lockStateProperty = isMasterUser() ? 'opsLockState' : 'pmLockState';
-                    const nextLockState = e.target.value;
-
-                    // If Ops is hiding a setting, warn and remove all doctor overrides for this setting
-                    if (isMasterUser() && lockStateProperty === 'opsLockState' && nextLockState === 'locked-hidden') {
-                      const overridesToRemove = getAllOverrideRecordsForSetting(moduleId, setting.id);
-                      if (overridesToRemove.length > 0) {
-                        setOpsHideOverridesData({
-                          moduleId,
-                          settingId: setting.id,
-                          settingName: setting.name,
-                          oldOpsLockState: setting.opsLockState,
-                          newOpsLockState: nextLockState,
-                          overridesToRemove
-                        });
-                        setShowOpsHideOverridesModal(true);
-                        return;
-                      }
-                    }
-
-                    // If Ops is locking visible, warn about existing overrides (keep vs remove)
-                    if (isMasterUser() && lockStateProperty === 'opsLockState' && nextLockState === 'locked-visible') {
-                      const overridesToRemove = getAllOverrideRecordsForSetting(moduleId, setting.id);
-                      if (overridesToRemove.length > 0) {
-                        setOpsLockVisibleOverridesData({
-                          moduleId,
-                          settingId: setting.id,
-                          settingName: setting.name,
-                          oldOpsLockState: setting.opsLockState,
-                          newOpsLockState: nextLockState,
-                          overridesToRemove
-                        });
-                        setShowOpsLockVisibleOverridesModal(true);
-                        return;
-                      }
-                    }
-
-                    updateSettingState(moduleId, setting.id, lockStateProperty, nextLockState);
-                  }
-                }}
-                disabled={isPMLockedByOps || (!showUserOverride && !isEnabled)}
-                className={`px-3 py-1 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500 ${
-                  (!showUserOverride && !isEnabled) ? 'bg-gray-100 cursor-not-allowed opacity-60' : 'bg-white'
-                }`}
-              >
-                <option value="unlocked">Unlocked</option>
-                <option value="locked-visible">Locked (Visible)</option>
-                <option value="locked-hidden">Locked (Hidden)</option>
-              </select>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-6">
-          <div>
-            <div className="flex items-start gap-4 mb-4">
-              <label className="text-sm font-medium text-gray-700 min-w-16 mt-2">{showUserOverride ? "User Value:" : "Default:"}</label>
-              <div className="flex-1">
-                {showUserOverride ? (
-                  <div className="space-y-4">
-                    {/* Show default value for reference */}
-                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-gray-600">Practice Default:</span>
-                        <span className="text-sm font-medium text-gray-900">
-                          {Array.isArray(setting.default) ? setting.default.join(', ') : setting.default}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* User override selector */}
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          id={`override-${setting.id}`}
-                          checked={hasUserOverride}
-                          onChange={(e) => {
-                            if (!e.target.checked) {
-                              // Remove override - use default
-                              setUserSetting(userId, moduleId, setting.id, 'value', undefined);
-                            } else {
-                              // Enable override - set to current default value
-                              setUserSetting(userId, moduleId, setting.id, 'value', setting.default);
-                            }
-                          }}
-                          disabled={userLockState === 'locked-visible'}
-                          className="w-4 h-4 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <label htmlFor={`override-${setting.id}`} className="text-sm font-medium text-gray-700">
-                          Use custom value for this user
-                        </label>
-                      </div>
-
-                      {hasUserOverride && (
-                        <div className="pl-7">
-                          <div className="p-4 bg-orange-50 border-l-4 border-orange-400 rounded mb-3">
-                            <p className="text-xs text-orange-800 font-medium">
-                              ⚠️ You are overriding the practice default for this user
-                            </p>
-                          </div>
-                          <div className="mt-3">
-                            {renderFormControl(true, userId)}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  renderFormControl()
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {getDisplaySubtext() && (
-          <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-400 rounded-lg">
-            <p className="text-sm text-blue-800 leading-relaxed">
-              {getDisplaySubtext()}
-            </p>
-          </div>
-        )}
-
-        {/* User Overrides Section - Only show in default settings view (not user-specific view) */}
-        {!showUserOverride &&
-          // Only allow overrides when Ops has left the setting unlocked for PM
-          setting.opsLockState === 'unlocked' &&
-          // PM gating (Ops can always access if opsLockState is unlocked)
-          (isMasterUser() || !isPMLockedByOps) &&
-          (moduleId === 'note-settings' || moduleId === 'controls' || moduleId === 'ehr-settings-amd' || moduleId === 'ehr-settings-athena' || moduleId === 'em-settings') && (
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h4 className="text-sm font-semibold text-gray-900">User Overrides</h4>
-                <p className="text-xs text-gray-500 mt-1">Customize this setting for specific users</p>
-              </div>
-              <button
-                onClick={() => {
-                  setCurrentOverrideSetting({ moduleId, settingId: setting.id, settingName: setting.name, settingType: setting.type, settingOptions: setting.options, defaultValue: setting.default });
-                  setShowAddOverrideModal(true);
-                }}
-                className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                + Add Override
-              </button>
-            </div>
-
-            {(() => {
-              const overrides = getSettingOverrides(moduleId, setting.id);
-              return overrides.length > 0 ? (
-                <div className="space-y-2">
-                  {overrides.map((override) => {
-                    const getLockStateColor = (lockState) => {
-                      switch (lockState) {
-                        case 'unlocked': return 'bg-green-100 text-green-700 border-green-300';
-                        case 'locked-visible': return 'bg-orange-100 text-orange-700 border-orange-300';
-                        case 'locked-hidden': return 'bg-red-100 text-red-700 border-red-300';
-                        default: return 'bg-gray-100 text-gray-700 border-gray-300';
-                      }
-                    };
-
-                    const getLockStateLabel = (lockState) => {
-                      switch (lockState) {
-                        case 'unlocked': return 'Unlocked';
-                        case 'locked-visible': return 'Locked Visible';
-                        case 'locked-hidden': return 'Locked Hidden';
-                        default: return 'Unlocked';
-                      }
-                    };
-
-                    return (
-                      <div key={override.userId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <p className="text-sm font-medium text-gray-900">{override.userName}</p>
-                            <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getLockStateColor(override.pmLockState)}`}>
-                              {getLockStateLabel(override.pmLockState)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-600">
-                            Override value: <span className="font-semibold text-blue-700">
-                              {Array.isArray(override.value) ? override.value.join(', ') : override.value}
-                            </span>
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Remove override for ${override.userName}?`)) {
-                              removeUserSetting(override.userId, moduleId, setting.id);
-                            }
-                          }}
-                          className="ml-3 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-4 px-3 bg-gray-50 rounded-lg border border-dashed border-gray-300">
-                  <p className="text-sm text-gray-500">No user overrides set for this setting</p>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-    );
+    setAllUsers((prev) => [...prev, newAccount]);
+    setShowAddPrimaryAccountModal(false);
+    setPrimaryAccountType('');
+    setCopyFromDoctorId('');
+    setNewPrimaryAccount({
+      name: '',
+      specialty: '',
+      email: ''
+    });
   };
+
+  // Modal Components
+
+  // Setting row moved to dedicated component
+
 
   // Main Left Navigation Component
   const LeftNavigation = () => (
@@ -4437,63 +873,6 @@ Which is the same as the practice-wide default. An override must differ from the
   const SettingsView = () => (
     <div className="flex-1 p-8 bg-gray-50 min-h-screen">
       <div className="max-w-4xl mx-auto">
-        {showServiceRepairBanner && pendingServiceRepairData && (
-          <div className="mb-6 bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-amber-900">Service overrides need repair</p>
-                <p className="text-sm text-amber-800 mt-1">
-                  Some users have Service Settings overrides that no longer match the enabled services. Apply repairs to keep defaults/overrides valid.
-                </p>
-                <p className="text-xs text-amber-800 mt-2">
-                  Impacted users: <span className="font-semibold">{pendingServiceRepairData.impactedUsers.length}</span>
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setShowServiceRepairBanner(false);
-                    setPendingServiceRepairData(null);
-                  }}
-                  className="px-3 py-2 text-amber-800 bg-white border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors text-sm font-medium"
-                >
-                  Dismiss
-                </button>
-                <button
-                  onClick={() => {
-                    if (!pendingServiceRepairData) return;
-
-                    pendingServiceRepairData.impactedUsers.forEach((u) => {
-                      if (u.shouldUpdateEnabledServices) {
-                        setUserSetting(u.userId, pendingServiceRepairData.moduleId, pendingServiceRepairData.settingId, 'value', u.newEnabledServices);
-                      }
-                      if (u.shouldUpdateDefaultService) {
-                        setUserSetting(u.userId, pendingServiceRepairData.moduleId, pendingServiceRepairData.settingId, 'defaultService', u.newDefaultService);
-                      }
-                    });
-
-                    if (pendingServiceRepairData.practiceDefaultServiceRepairNeeded) {
-                      updateSettingState(
-                        pendingServiceRepairData.moduleId,
-                        pendingServiceRepairData.settingId,
-                        'defaultService',
-                        pendingServiceRepairData.practiceEnabledServices[0]
-                      );
-                    }
-
-                    setShowServiceRepairBanner(false);
-                    setPendingServiceRepairData(null);
-                    setCrossTabToast('Repaired Service Settings overrides.');
-                  }}
-                  className="px-3 py-2 text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium"
-                >
-                  Apply repairs
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {showCrossTabOverridesBanner && pendingCrossTabOverrides && (
           <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-400 p-4 rounded">
             <div className="flex items-start justify-between gap-4">
@@ -4570,6 +949,41 @@ Which is the same as the practice-wide default. An override must differ from the
           </div>
         )}
 
+        {isMasterUser() && (
+          <div className="mb-6 bg-violet-50 border border-violet-200 rounded-lg p-4">
+            <p className="text-sm font-semibold text-violet-900">Prototype Flow Triggers (Ops)</p>
+            <p className="text-xs text-violet-800 mt-1">
+              Use these demo actions to preview modals for Ops lock/override cleanup.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={openPrototypeOpsHideFlow}
+                className="px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Preview: Ops Lock Hidden
+              </button>
+              <button
+                onClick={openPrototypeOpsVisibleFlow}
+                className="px-3 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                Preview: Ops Lock Visible
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isMasterUser() && isPMReadOnly && (
+          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <p className="text-sm text-amber-900 font-medium">
+              Ops is active. Dashboard is currently in read-only mode.
+            </p>
+            <p className="text-xs text-amber-800 mt-1">
+              {activeOpsUser ? `Active Ops user: ${activeOpsUser}. ` : ''}
+              You can view settings, but editing is temporarily disabled.
+            </p>
+          </div>
+        )}
+
         <div className="mb-8">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -4595,6 +1009,28 @@ Which is the same as the practice-wide default. An override must differ from the
               key={setting.id}
               setting={setting}
               moduleId={selectedModule}
+              isSettingEnabled={isSettingEnabled}
+              getAvailableOptions={getAvailableOptions}
+              isMasterUser={isMasterUser}
+              getSettingById={getSettingById}
+              getUserSetting={getUserSetting}
+              doesOverrideMatchDefault={doesOverrideMatchDefault}
+              getMatchingOverrideAlertMessage={getMatchingOverrideAlertMessage}
+              valuesAreEqual={valuesAreEqual}
+              setPendingSettingChange={setPendingSettingChange}
+              setShowOverrideConfirmModal={setShowOverrideConfirmModal}
+              removeUserSetting={removeUserSetting}
+              setUserSetting={setUserSetting}
+              updateSettingState={updateSettingState}
+              isPMReadOnly={isPMReadOnly}
+              getSettingOverrides={getSettingOverrides}
+              setCurrentOverrideSetting={setCurrentOverrideSetting}
+              setShowAddOverrideModal={setShowAddOverrideModal}
+              moduleSettings={moduleSettings}
+              isGoogleSignedIn={isGoogleSignedIn}
+              setIsGoogleSignedIn={setIsGoogleSignedIn}
+              setShowGoogleSignoutModal={setShowGoogleSignoutModal}
+              onRequestAttestation={() => setShowEmailModal(true)}
             />
           ))}
         </div>
@@ -5407,21 +1843,231 @@ Which is the same as the practice-wide default. An override must differ from the
         )}
       </div>
 
-      <EmailAttestationModal />
-      <HipaaEmailConfirmModal />
-      <SuspendAccountModal />
-      <ResetPinModal />
-      <LinkAccountModal />
-      <AddUserTypeModal />
-      <AddPrimaryAccountModal />
-      <AddSecondaryAccountModal />
-      <OverrideConfirmModal />
-      <OverrideCleanupModal />
-      <OpsHideOverridesModal />
-      <OpsLockVisibleOverridesModal />
-      <ServiceDisableRepairModal />
-      <GoogleSignoutConfirmModal />
-      <AddOverrideModal />
+      <EmailAttestationModal
+        open={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        onAttest={() => {
+          updateSettingState('controls', 22, 'default', 'True');
+          setShowEmailModal(false);
+        }}
+      />
+      <HipaaEmailConfirmModal
+        open={showHipaaEmailConfirm}
+        user={hipaaAttestationUser}
+        onClose={() => {
+          setShowHipaaEmailConfirm(false);
+          setHipaaAttestationUser(null);
+        }}
+      />
+      <SuspendAccountModal
+        open={showSuspendModal}
+        selectedUser={selectedUser}
+        onClose={() => setShowSuspendModal(false)}
+        onConfirm={() => {
+          setShowSuspendModal(false);
+          alert('Account suspended successfully!');
+        }}
+      />
+      <ResetPinModal
+        open={showResetPinModal}
+        selectedUser={selectedUser}
+        onClose={() => setShowResetPinModal(false)}
+      />
+      <LinkedAssignmentModal
+        open={showLinkAccountModal}
+        availableUsers={availableLinkedAssignmentUsers}
+        selectedUserData={selectedLinkedAssignmentUser}
+        selectedNewUser={selectedNewUser}
+        newLinkAssignmentType={newLinkAssignmentType}
+        linkDateError={linkDateError}
+        onClose={() => {
+          setShowLinkAccountModal(false);
+          setLinkDateError('');
+        }}
+        onSelectedUserChange={(value) => {
+          setSelectedNewUser(value);
+          setLinkDateError('');
+        }}
+        onAssignmentTypeChange={(value) => {
+          setNewLinkAssignmentType(value);
+          setLinkDateError('');
+        }}
+        onSave={handleSaveLinkedAssignment}
+      />
+      <UserTypeModal
+        open={showAddUserTypeModal}
+        onClose={() => setShowAddUserTypeModal(false)}
+        onSelectPrimary={() => {
+          setShowAddUserTypeModal(false);
+          setShowAddPrimaryAccountModal(true);
+        }}
+        onSelectSecondary={() => {
+          setShowAddUserTypeModal(false);
+          setShowAddSecondaryAccountModal(true);
+        }}
+      />
+      <AddPrimaryAccountModal
+        open={showAddPrimaryAccountModal}
+        allUsers={allUsers}
+        primaryAccountType={primaryAccountType}
+        copyFromDoctorId={copyFromDoctorId}
+        newPrimaryAccount={newPrimaryAccount}
+        onClose={() => {
+          setShowAddPrimaryAccountModal(false);
+          setPrimaryAccountType('');
+          setCopyFromDoctorId('');
+        }}
+        onAccountTypeChange={setPrimaryAccountType}
+        onCopyFromDoctorChange={setCopyFromDoctorId}
+        onPrimaryFieldChange={(field, value) =>
+          setNewPrimaryAccount((prev) => ({ ...prev, [field]: value }))
+        }
+        onAddDoctor={handleAddPrimaryAccount}
+      />
+      <AddSecondaryAccountModal
+        open={showAddSecondaryAccountModal}
+        newSecondaryAccount={newSecondaryAccount}
+        onClose={() => setShowAddSecondaryAccountModal(false)}
+        onFieldChange={(field, value) =>
+          setNewSecondaryAccount((prev) => ({ ...prev, [field]: value }))
+        }
+        onTogglePermission={updateSecondaryPermission}
+        isPermissionEnabled={isSecondaryPermissionEnabled}
+        onAddAccount={handleAddSecondaryAccount}
+      />
+      <OverrideConfirmModal
+        open={showOverrideConfirmModal}
+        pendingSettingChange={pendingSettingChange}
+        selectedUser={selectedUser}
+        onCancel={() => {
+          setShowOverrideConfirmModal(false);
+          setPendingSettingChange(null);
+        }}
+        onConfirm={() => {
+          if (pendingSettingChange) {
+            const propertyToUpdate = pendingSettingChange.isLockStateChange ? 'pmLockState' : 'value';
+            setUserSetting(
+              pendingSettingChange.userId,
+              pendingSettingChange.moduleId,
+              pendingSettingChange.settingId,
+              propertyToUpdate,
+              pendingSettingChange.newValue
+            );
+          }
+          setShowOverrideConfirmModal(false);
+          setPendingSettingChange(null);
+        }}
+      />
+      <OverrideCleanupModal
+        open={showOverrideCleanupModal}
+        data={overrideCleanupData}
+        onCancel={() => {
+          setShowOverrideCleanupModal(false);
+          setOverrideCleanupData(null);
+        }}
+        onConfirm={() => {
+          if (overrideCleanupData) {
+            removeMultipleOverrides(
+              overrideCleanupData.redundantOverrides,
+              overrideCleanupData.moduleId,
+              overrideCleanupData.settingId
+            );
+
+            setModuleSettings((prev) => ({
+              ...prev,
+              [overrideCleanupData.moduleId]: {
+                ...prev[overrideCleanupData.moduleId],
+                settings: prev[overrideCleanupData.moduleId].settings.map((setting) =>
+                  setting.id === overrideCleanupData.settingId
+                    ? { ...setting, [overrideCleanupData.property]: overrideCleanupData.newDefault }
+                    : setting
+                )
+              }
+            }));
+          }
+          setShowOverrideCleanupModal(false);
+          setOverrideCleanupData(null);
+        }}
+      />
+      <GoogleSignoutConfirmModal
+        open={showGoogleSignoutModal}
+        onCancel={() => setShowGoogleSignoutModal(false)}
+        onConfirm={() => {
+          setIsGoogleSignedIn(false);
+          setShowGoogleSignoutModal(false);
+          updateSettingState('teleconsult-settings', 71, 'default', false);
+        }}
+      />
+      <AddOverrideModal
+        open={showAddOverrideModal}
+        currentOverrideSetting={currentOverrideSetting}
+        allUsers={allUsers}
+        isMasterUser={isMasterUser}
+        isPMReadOnly={isPMReadOnly}
+        moduleSettings={moduleSettings}
+        hipaaAttestationChecked={hipaaAttestationChecked}
+        setHipaaAttestationChecked={setHipaaAttestationChecked}
+        setHipaaAttestationUser={setHipaaAttestationUser}
+        setShowHipaaEmailConfirm={setShowHipaaEmailConfirm}
+        getSettingOverrides={getSettingOverrides}
+        getMatchingOverrideAlertMessage={getMatchingOverrideAlertMessage}
+        doesOverrideMatchDefault={doesOverrideMatchDefault}
+        setUserSetting={setUserSetting}
+        onClose={() => {
+          setShowAddOverrideModal(false);
+          setCurrentOverrideSetting(null);
+        }}
+      />
+      <OpsHideOverridesModal
+        open={showOpsHideOverridesModal}
+        data={opsHideOverridesData}
+        onCancel={() => {
+          setShowOpsHideOverridesModal(false);
+          setOpsHideOverridesData(null);
+        }}
+        onConfirm={() => {
+          if (opsHideOverridesData) {
+            removeMultipleOverrides(
+              opsHideOverridesData.overridesToRemove,
+              opsHideOverridesData.moduleId,
+              opsHideOverridesData.settingId
+            );
+            applySettingProperty(opsHideOverridesData.moduleId, opsHideOverridesData.settingId, 'opsLockState', 'locked-hidden');
+            setCrossTabToast('Ops Lock set to Locked (Hidden). Overrides removed.');
+          }
+          setShowOpsHideOverridesModal(false);
+          setOpsHideOverridesData(null);
+        }}
+      />
+      <OpsLockVisibleOverridesModal
+        open={showOpsLockVisibleOverridesModal}
+        data={opsLockVisibleOverridesData}
+        onCancel={() => {
+          setShowOpsLockVisibleOverridesModal(false);
+          setOpsLockVisibleOverridesData(null);
+        }}
+        onKeepOverrides={() => {
+          if (opsLockVisibleOverridesData) {
+            applySettingProperty(opsLockVisibleOverridesData.moduleId, opsLockVisibleOverridesData.settingId, 'opsLockState', 'locked-visible');
+            setCrossTabToast('Ops Lock set to Locked (Visible). Overrides kept.');
+          }
+          setShowOpsLockVisibleOverridesModal(false);
+          setOpsLockVisibleOverridesData(null);
+        }}
+        onRemoveAndLock={() => {
+          if (opsLockVisibleOverridesData) {
+            removeMultipleOverrides(
+              opsLockVisibleOverridesData.overridesToRemove,
+              opsLockVisibleOverridesData.moduleId,
+              opsLockVisibleOverridesData.settingId
+            );
+            applySettingProperty(opsLockVisibleOverridesData.moduleId, opsLockVisibleOverridesData.settingId, 'opsLockState', 'locked-visible');
+            setCrossTabToast('Ops Lock set to Locked (Visible). Overrides removed.');
+          }
+          setShowOpsLockVisibleOverridesModal(false);
+          setOpsLockVisibleOverridesData(null);
+        }}
+      />
     </div>
   );
 };

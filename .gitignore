@@ -33,6 +33,7 @@ Thumbs.db
 # Local app / tool state
 npm-cache/
 .claude/
+.cursor/*.log
 
 # Backups
 *.backup

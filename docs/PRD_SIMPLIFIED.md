@@ -1,7 +1,7 @@
 # Product Requirements Document: Simplified Practice Settings Dashboard
 
-**Version:** 1.0
-**Last Updated:** December 1, 2025
+**Version:** 1.2
+**Last Updated:** March 23, 2026
 **Status:** Active Development
 **Branch:** `simplified-master-user`
 
@@ -15,7 +15,7 @@ A simplified dual-role healthcare settings management system with:
 - **Practice Manager (PM)**: Manage practice-wide settings and user-specific overrides
 
 ### Key Simplification
-No separate Ops dashboard - just a master user email that can edit defaults and control PM access via lock states within the PM dashboard interface.
+No separate Ops dashboard. Ops and PM use the same dashboard surface, with role-specific permissions enforced through lock states.
 
 ### Implementation Reference
 For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see:
@@ -27,7 +27,10 @@ For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see
 
 ### 2.1 Master User (Ops)
 
-**Email:** `ops@marvix.com`
+**Demo Access Pattern:**
+- Role selected explicitly on login (`Ops` tab)
+- Valid demo Ops email must exist in `opsPracticeAccess`
+- Current seeded Ops email: `ops@marvix.ai`
 
 **Can Access:**
 - ✅ Settings view (all 6 modules)
@@ -50,7 +53,12 @@ For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see
 
 ### 2.2 Practice Manager (PM)
 
-**Email:** `pm@practice.com` (or any other email)
+**Demo Access Pattern:**
+- Role selected explicitly on login (`PM` tab)
+- PM email must be present in `pmPracticeBinding`
+- Current seeded PM emails:
+  - `a@sunrise.hp`
+  - `a@manipal.hp`
 
 **Can Access:**
 - ✅ Settings view (all 6 modules)
@@ -78,14 +86,9 @@ For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see
 
 ### 3.1 Lock States
 
-Every setting has **TWO independent lock state fields:**
-
-```javascript
-{
-  opsLockState: 'unlocked' | 'locked-visible' | 'locked-hidden',  // Ops → PM
-  pmLockState: 'unlocked' | 'locked-visible' | 'locked-hidden'    // PM → Doctors
-}
-```
+Every setting has two lock controls:
+- `opsLockState` (Ops -> PM access)
+- `pmLockState` (PM -> Doctor access)
 
 ### 3.2 opsLockState (Ops Controls PM Access)
 
@@ -132,153 +135,113 @@ Ops (opsLockState) → PM (pmLockState) → Doctors
 ### 4.1 Simple Input Types
 
 #### **Toggle** (Boolean On/Off)
-- **UI:** Toggle switch (Green = True, Gray = False)
-- **Data:** `options: ['True', 'False']`, `default: 'True' | 'False'`
 - **Examples:**
   - Capture Dictation Separately
   - Always Use Default Visit Type
   - Auto Create Consults
 
 **Behavior:**
-- Single click toggles value
-- Dependent settings disabled when parent = False
-- Can have subtexts for each option
+- User turns setting on/off with one action.
+- If a dependent setting relies on this toggle, that dependent setting is disabled when prerequisite conditions are not met.
+- Lock-state rules still apply (Ops/PM may see or edit based on lock configuration).
 
 ---
 
 #### **Dropdown** (Single Selection)
-- **UI:** Select dropdown menu
-- **Data:** `options: [...]`, `default: one option`
 - **Examples:**
   - Default Patient Pronoun (He/She/They)
   - Patient Name (As Entered/Infer from Audio/"The Patient")
   - Default Visit Type (First Visit/Follow up)
 
 **Behavior:**
-- Select one option from list
-- Can have option-specific subtexts
-- Default value must be in options array
+- User selects one value from predefined options.
+- Selected value becomes the practice default unless a user-specific override exists.
+- Optional helper text can explain option intent.
 
 ---
 
 ### 4.2 Multi-Selection Types
 
 #### **Multiselect** (Multiple Checkboxes)
-- **UI:** Checkbox list
-- **Data:** `options: [...]`, `default: [...array...]`
 - **Examples:**
   - Sections to Include (HPI, Physical Exam, Assessment, Plan, etc.)
 
 **Behavior:**
-- Select 0 to N options
-- Default is array of selected options
-- All/none selected are both valid states
+- User can select multiple options.
+- Selection controls what is included downstream for non-overridden users.
+- Empty selection is allowed when business rules for that setting permit it.
 
 ---
 
 #### **Time Multiselect** (Time Grid)
-- **UI:** Grid of time buttons (max 6 selections)
-- **Data:** `options: [...times...]`, `default: [...max 6 times...]`
 - **Examples:**
   - Auto Sync Times (00:00, 06:00, 12:00, 18:00)
 
 **Behavior:**
-- Visual grid layout
-- Maximum 6 selections
-- Empty = valid (no auto-sync)
-- Each time is a button
+- User chooses one or more scheduled times for an automated action.
+- Maximum selection cap is enforced.
+- No selection means the automation does not run on schedule.
 
 ---
 
 ### 4.3 Ordering & Sequence Types
 
 #### **Order List** (Drag & Drop)
-- **UI:** Draggable list with arrows
-- **Data:** `options: [...all items...]`, `default: [...ordered array...]`
 - **Examples:**
   - Section Order (determines note structure order)
 
 **Behavior:**
-- Drag items to reorder
-- Up/down arrow buttons
-- Single item list = no reorder possible
-- Can add items from available options
+- User controls output order by reordering items.
+- New order applies as the default for users without overrides.
+- Reordering is only available when there is more than one item.
 
 ---
 
 #### **Range Selector** (Time Range Dropdown)
-- **UI:** Dropdown + visual indicator
-- **Data:** `options: ['1 day', '30 days']`, `default: '7 days'`
 - **Examples:**
   - Auto Delete Old Consults (1-90 days)
   - Appointment Sync Range (1-30 days)
 
 **Behavior:**
-- Select range from dropdown
-- Visual representation of selected range
-- Used for EHR sync and data retention
-- Long ranges (90 days) may impact performance
+- User chooses a bounded range (for retention/sync windows).
+- Range choice determines operational behavior for that module.
+- Product may surface warnings for high-impact ranges.
 
 ---
 
 ### 4.4 Special/Complex Types
 
 #### **Service Settings Combined**
-- **UI:** Checkboxes (enabled services) + Dropdown (default service)
-- **Data:**
-  ```javascript
-  {
-    default: ['Emergency', 'Outpatient', 'Inpatient'], // enabled services
-    defaultService: 'Emergency' // default selected service
-  }
-  ```
 - **Examples:**
   - Available Service Types
 
 **Behavior:**
-- **Enabled Services:** Which services are available (multiselect)
-- **Default Service:** Pre-selected service from enabled list
-- **Validation:** defaultService must be in enabled services array
-- **Minimum:** Must keep at least 1 service enabled
-- **Auto-correct:** If defaultService not in enabled, auto-selects first enabled
-
-**Edge Cases:**
-- Disable all services → Prevented (minimum 1)
-- User override has disabled service → **Needs definition**
-- PM has 10 overrides with service X, Ops disables X → **Needs definition**
+- User enables available services and chooses one default service.
+- At least one service must remain enabled at all times.
+- Default service must be one of the enabled services.
+- When Ops/PM changes service availability, impacted overrides are reviewed and reconciled with user confirmation.
 
 ---
 
 #### **Google Sign-in** (OAuth Integration)
-- **UI:** Info box + "Sign in with Google" button
-- **Data:** `default: boolean` (signed in state)
 - **Examples:**
   - Google Calendar Integration
 
 **Behavior:**
-- Not editable like normal settings
-- Triggers OAuth flow
-- Shows connected/disconnected state
-- Can sign out (shows confirmation modal)
-
-**Edge Cases:**
-- OAuth fails → stays disconnected
-- Token expires → requires re-auth
-- Multiple users, one Google account → shared calendar
+- User initiates Google connection from the setting row.
+- Setting shows connected/disconnected account status.
+- If connection expires or fails, user is prompted to reconnect.
 
 ---
 
 #### **Zoom Check** (OAuth Integration)
-- **UI:** Info box + "Connect Zoom" button
-- **Data:** `default: boolean` (installed state)
 - **Examples:**
   - Zoom App Integration
 
 **Behavior:**
-- Similar to Google Sign-in
-- Checks if Zoom app is installed/connected
-- Shows install/uninstall state
-- Can disconnect
+- User connects or disconnects Zoom from the setting row.
+- Setting shows whether integration is active.
+- Integration availability is treated as account/system state, not a free-form setting value.
 
 ---
 
@@ -345,11 +308,82 @@ If Ops changes default to Central:
 - Edit override pmLockState (independent of default's pmLockState)
 - Delete overrides (user reverts to default immediately)
 
-**Master User Cannot:**
-- See User Overrides section
-- Create overrides
-- Edit existing overrides
-- (But changing default affects non-override users)
+**Master User (Ops) Current Prototype Behavior:**
+- Can access the same override modal flow as PM for settings with `opsLockState: 'unlocked'`
+- Can create and remove overrides for those unlocked settings
+- Cannot add overrides when `opsLockState` is not `unlocked`
+
+---
+
+### 5.5 Linked Assignments (Prototype)
+
+- PM/Ops can create linked assignments from a primary doctor to either:
+  - a secondary user (nurse/assistant/etc.), or
+  - another primary doctor (coverage/assistant scenarios).
+- Assignment types:
+  - `assistant` (acts as MA/assistant)
+  - `coverage` (doctor coverage)
+- Required inputs: assignee user + assignment type.
+- Conflict rule: prevent duplicates for the same `(assignee, doctor, assignmentType)` tuple.
+- Unlink removes only the selected assignment record.
+- Linked assignments are shown in:
+  - primary doctor view (users assigned to that doctor),
+  - assignee view (doctors that selected user is assigned to).
+
+---
+
+### 5.6 Add New User (Doctor / Secondary) - PM/Ops Flow
+
+**Entry Point:**
+- User Management > `+ Add User`
+- PM and Ops can access this flow.
+
+**Step 1: Select Account Type**
+- Primary Account (Doctor)
+- Secondary Account (Staff)
+
+**Step 2A: Add Primary Account (Doctor)**
+- Required fields:
+  - Full name
+  - Specialty
+  - Email
+- Setup methods:
+  - **Request New Account**: creates a new doctor account with practice defaults.
+  - **Copy from Existing Doctor**: select source doctor, then create new doctor account with copied configuration.
+- Validation:
+  - All required fields must be present.
+  - If "Copy from Existing Doctor" is selected, source doctor selection is required.
+
+**Step 2B: Add Secondary Account (Staff)**
+- Required fields:
+  - Full name
+  - Role
+  - Email
+- Permission controls:
+  - Merge and Link Appointments
+  - Create Consults
+  - Can Generate Notes
+  - Edit Generated Notes
+  - Push to EHR
+- Permission dependency rules:
+  - `Edit Generated Notes` requires `Can Generate Notes`.
+  - `Push to EHR` requires both `Can Generate Notes` and `Edit Generated Notes`.
+- New secondary accounts are available immediately for linking to doctors.
+
+**Step 3: Create Linked Assignment**
+- Triggered from selected primary doctor > `Linked Assignments` > `Add Assignment`.
+- Required inputs:
+  - Assignee (primary or secondary)
+  - Assignment type (`assistant` or `coverage`)
+- Validation:
+  - Prevent duplicate assignment for same `(assignee, doctor, assignmentType)` tuple.
+
+**Post-Create / Post-Link Behavior**
+- New doctor or secondary user appears immediately in User Management.
+- Linked assignment appears in:
+  - primary doctor view (assigned users),
+  - assignee view (linked doctors).
+- Unlink removes only the selected assignment record.
 
 ---
 
@@ -471,13 +505,47 @@ If Ops changes default to Central:
 
 ## 7. UI Components & Behavior
 
+### 7.0 Authentication Flow (Implemented)
+
+The app starts with a dedicated authentication flow before the dashboard renders.
+
+**Step 1: Sign in**
+- User chooses `PM` or `Ops` via tab selector.
+- User enters email + password.
+- Demo password is currently `marvix`.
+- Login validation:
+  - Ops: email must exist in `opsPracticeAccess`.
+  - PM: email must exist in `pmPracticeBinding`.
+
+**Step 2: MFA**
+- A 6-digit code is generated and required for sign-in completion.
+- Demo UI shows the generated code.
+- Resend code regenerates and replaces the previous code.
+
+**Step 3: Practice Resolution**
+- PM: auto-bound to one practice from `pmPracticeBinding`.
+- Ops:
+  - If exactly one practice is accessible, login completes directly.
+  - If multiple practices are accessible, user selects one.
+
+**Step 4: Runtime Access Gating (Post-login)**
+- If an Ops session is active in the same practice:
+  - PM can still open dashboard, but write actions are disabled (read-only mode).
+  - PM sees active Ops context.
+- If another Ops user is already active:
+  - incoming Ops user is blocked until the active Ops session ends or becomes stale.
+- Session state is propagated across tabs via storage/events.
+
 ### 7.1 Header
 
 **Elements:**
 - Practice Management Dashboard title
-- User switcher dropdown (right side):
-  - Options: "PM (Practice Manager)", "Ops (Master User)"
-  - Shows "MASTER" badge when ops@marvix.com selected
+- Authenticated user context (email/role/practice)
+- Logout action
+
+**Note:**
+- Runtime user switching in header is no longer the primary role switch path.
+- Role selection now happens at login.
 
 ---
 
@@ -497,34 +565,23 @@ If Ops changes default to Central:
 
 ### 7.3 Settings View
 
-**For Each Setting:**
+**For each setting row:**
+- Setting label and contextual help text
+- Ops lock-state badge display (read-only indicator for current `opsLockState`)
+- Default value control
+- User override management (PM and Ops, where permitted)
 
-```
-┌─────────────────────────────────────────────────┐
-│ Setting Name  [Lock State Dropdown]             │
-│ Subtext                                         │
-│                                                 │
-│ Default: [Input Control]                        │
-│                                                 │
-│ User Overrides: (only shown for PM)            │
-│ ┌─────────────────────────────────────────┐   │
-│ │ Dr. Name    Override Value    [Delete]  │   │
-│ └─────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
-```
-
-**Lock State Dropdown:**
-- Master user sees: "Ops Lock" → controls opsLockState
-- PM user sees: "PM Lock" → controls pmLockState
-- Options: Unlocked, Locked (Visible), Locked (Hidden)
+**Current prototype note:**
+- The extracted row component currently surfaces default-value controls and override management.
+- Full inline lock dropdown controls are not currently rendered in the row in this prototype pass.
 
 **Input Control:** Varies by setting type (see Section 4)
 
 **User Overrides Section:**
-- Only visible to PM user
+- Visible for PM and Ops when setting `opsLockState` is `unlocked`
 - Shows list of users with custom values
 - "+ Add Override" button
-- Each override shows: user name, value, pmLockState badge, delete button
+- Each override shows: user name, value, and remove action
 
 ---
 
@@ -555,6 +612,19 @@ If Ops changes default to Central:
 - Confirmation buttons
 
 **Action:** Remove all redundant overrides on confirmation
+
+---
+
+### 7.6 User Management Actions (Prototype)
+
+**Manage Access Actions:**
+- Suspend Account
+- Reset PIN
+
+**Linked Assignment Actions:**
+- Add assignment (primary/secondary assignee)
+- Select assignment type (`assistant` or `coverage`)
+- Unlink assignment from doctor view
 
 ---
 
@@ -604,6 +674,12 @@ If Ops changes default to Central:
 - Disabled when parent setting = False
 - Grayed out in UI
 - Cannot be edited until parent = True
+
+**Ops→PM propagation for dependent settings:**
+- If a parent setting is `opsLockState: locked-hidden`, PM should not see the dependent setting either (avoid “orphan” settings).
+- If a parent setting is `opsLockState: locked-visible`, PM can see the dependent but cannot edit it (even if the dependent itself is unlocked), because its meaning depends on the parent’s state.
+- Dependency enforcement applies to practice defaults: if the parent is not enabled, PM cannot change the dependent default.
+- When a dependent setting is disabled by dependency, its lock dropdown is also disabled (to avoid “looks editable but won’t apply” confusion).
 
 **Examples:**
 - "Always Use Default Visit Type" depends on "Default Visit Type"
@@ -677,21 +753,22 @@ PM User
 
 ### 10.1 Concurrent Operations
 
-| Scenario | Risk | Expected Behavior |
-|----------|------|------------------|
-| **Ops changes default while PM editing** | Race condition | Last write wins, no conflict resolution |
-| **Ops locks setting while PM in Add Override modal** | PM loses work | Override creation fails with error |
-| **Ops changes opsLockState while PM viewing** | UI out of sync | PM view updates immediately |
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| **Ops is active in a practice** | PM can access dashboard in read-only mode; all PM write actions are disabled until Ops session ends. |
+| **Ops changes a setting while PM is editing** | Most recent saved change is applied; user sees updated state. |
+| **Ops changes lock state while PM is in an override flow** | PM action is blocked if the new lock no longer permits it, with clear error feedback. |
+| **Settings change in another tab/session** | UI informs the user and applies or prompts for updates without silently losing in-progress work. |
 
 ---
 
 ### 10.2 Service Settings Edge Cases
 
-| Scenario | Risk | Mitigation |
-|----------|------|-----------|
-| **User override has service now disabled** | Invalid state | **Needs definition:** Auto-revert? Show error? |
-| **Disable all services** | Settings broken | System prevents: minimum 1 enabled |
-| **defaultService not in enabled** | Invalid state | Auto-correct to first enabled service |
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| **User override references a service no longer enabled** | Product flags impacted users and requires confirmation before reconciliation. |
+| **User attempts to disable all services** | Product blocks the action and requires at least one enabled service. |
+| **Default service is no longer valid** | Product requires/chooses a valid enabled default before save completes. |
 
 ---
 
@@ -701,7 +778,7 @@ PM User
 |----------|----------|
 | **Ops changes default, PM has overrides** | All overrides unchanged, only non-override users see new default |
 | **Override matches new default (value + pmLockState)** | Show confirmation modal → Auto-remove on confirm |
-| **PM changes default, 50 overrides affected** | Redundancy detection may be slow, show progress |
+| **PM changes default, many overrides affected** | Product provides clear feedback while evaluating/removing redundant overrides |
 
 ---
 
@@ -709,19 +786,25 @@ PM User
 
 | Scenario | Impact |
 |----------|--------|
-| **opsLockState: unlocked → locked-visible** | PM loses edit access immediately, sees disabled controls |
-| **opsLockState: unlocked → locked-hidden** | Setting disappears from PM view, overrides invisible but active |
+| **opsLockState: unlocked → locked-visible** | PM loses edit access immediately, sees disabled controls. If overrides exist, Ops is prompted to keep them (they reappear on unlock) or remove them now. |
+| **opsLockState: unlocked → locked-hidden** | Setting disappears from PM view, and existing doctor overrides for that setting are removed after confirmation |
 | **opsLockState: locked → unlocked** | PM regains full access, can create overrides again |
 
 ---
 
+### 10.5 Dependent Settings Interactions
+
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| **Parent setting is locked/hidden by Ops** | Dependent settings follow the same effective PM access constraints to avoid inconsistent UX. |
+| **Parent change makes dependent default invalid** | Product requires a valid dependent default and communicates the adjustment. |
+
 ## 11. Performance Considerations
 
-| Scenario | Impact | Mitigation |
-|----------|--------|-----------|
-| **100+ overrides per setting** | Slow rendering | Paginate override list, lazy load |
-| **Redundancy detection on 500 users** | Slow UI | Show progress indicator, async processing |
-| **Long range selectors (90 days)** | EHR sync performance | Warn user about performance impact |
+Performance expectations are tracked as product constraints:
+- Large override sets should remain usable with clear progress/feedback.
+- High-impact operations should communicate status during processing.
+- Long data/sync windows should show user-facing warnings where relevant.
 
 ---
 
@@ -742,84 +825,21 @@ PM User
 
 ## 13. Technical Implementation
 
-### 13.1 Setting Data Structure
+Detailed technical design (data models, persistence keys, and runtime role/session handling) is maintained in:
+- `docs/TECHNICAL_DOCUMENTATION.md`
 
-```javascript
-{
-  id: 1,
-  name: 'Default Patient Pronoun',
-  type: 'dropdown',
-  options: ['He', 'She', 'They'],
-  default: 'They',
-  opsLockState: 'unlocked',  // Ops → PM
-  pmLockState: 'unlocked',   // PM → Doctors
-  subtext: 'Optional description',
-  subtexts: {                 // Optional, for option-specific descriptions
-    'He': 'Use male pronoun',
-    'She': 'Use female pronoun',
-    'They': 'Use gender-neutral pronoun'
-  },
-  required: false,            // Optional
-  dependsOn: {                // Optional
-    settingId: 3,
-    value: 'True'
-  }
-}
-```
+Current prototype persistence scope:
+- Persisted (practice-scoped localStorage): module settings, user overrides, linked assignments.
+- Session-scoped localStorage: auth session and active master-user heartbeat/session.
+- In-memory only: user directory mutations from "Add User" flow (not yet persisted across reloads).
 
----
-
-### 13.2 Override Data Structure
-
-```javascript
-{
-  'user1-note-settings-1': {
-    value: 'She',
-    pmLockState: 'locked-visible'
-  },
-  'user2-controls-20': {
-    value: 'Pacific (America/Los Angeles)',
-    pmLockState: 'unlocked'
-  }
-}
-```
-
-**Key Format:** `${userId}-${moduleId}-${settingId}`
-
----
-
-### 13.3 User Data Structure
-
-```javascript
-{
-  id: 1,
-  name: 'Dr. Sarah Johnson',
-  type: 'primary',
-  specialty: 'Cardiology',
-  email: 'sarah.johnson@clinic.com',
-  permissions: {
-    createConsults: true,
-    canGenerateNotes: true,
-    editGeneratedNotes: true,
-    pushToEHR: true
-  }
-}
-```
-
----
-
-### 13.4 Role Detection
-
-```javascript
-const MASTER_USER_EMAIL = 'ops@marvix.com';
-const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
-```
+This PRD captures product behavior and acceptance-level requirements only.
 
 ---
 
 ## 14. Glossary
 
-- **Master User (Ops)**: Email-based elevated permissions user who controls defaults and PM access
+- **Master User (Ops)**: Elevated-permission role that controls defaults and PM access
 - **PM**: Practice Manager, manages practice-wide settings and user overrides
 - **opsLockState**: Lock state controlling PM's access to settings (set by Ops)
 - **pmLockState**: Lock state controlling doctor's access to settings (set by PM)
@@ -828,12 +848,13 @@ const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
 - **Cascading Lock**: When upper-level lock (ops) prevents lower-level control (PM)
 - **Dependent Setting**: Setting that is disabled when parent setting = False
 - **Service Settings**: Complex setting type with enabled services + default service
+- **Linked Assignment**: Relationship linking an assignee (primary/secondary) to a doctor with an assignment type (`assistant` or `coverage`)
 
 ---
 
 **Document Status:** Active
-**Last Review:** December 1, 2025
-**Next Review:** December 2025
+**Last Review:** March 23, 2026
+**Next Review:** April 2026
 
 ---
 
@@ -847,3 +868,18 @@ const isMasterUser = () => currentUserEmail === MASTER_USER_EMAIL;
 - Documented all 6 settings modules (29 total settings)
 - Added edge cases and business rules
 - Technical implementation details
+
+### Version 1.1 (March 23, 2026)
+- Updated auth model to match implemented login + MFA + practice selection flow.
+- Replaced email-based role inference with session-based role resolution.
+- Documented practice-scoped storage keys for settings, overrides, and linked assignments.
+
+### Version 1.2 (March 23, 2026)
+- Streamlined PRD language to focus on product behavior and acceptance-level requirements.
+- Kept Setting Types, Data Flow, and Edge Cases as concise product sections.
+- Moved implementation-heavy detail to `docs/TECHNICAL_DOCUMENTATION.md`.
+
+### Version 1.3 (March 23, 2026)
+- Updated linked-account sections to linked-assignment model (primary/secondary assignees; assistant/coverage types).
+- Added post-login runtime access gating behavior for Ops-active sessions.
+- Added explicit User Management action flow and prototype persistence scope notes.

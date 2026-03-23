@@ -1,643 +1,227 @@
 # Practice Settings Dashboard - Technical Documentation
 
-## Table of Contents
-1. [System Overview](#system-overview)
-2. [Architecture](#architecture)
-3. [Data Structures](#data-structures)
-4. [Key Components](#key-components)
-5. [Validation System](#validation-system)
-6. [Override Management](#override-management)
-7. [API Reference](#api-reference)
-8. [Testing Guide](#testing-guide)
+**Last Updated:** March 23, 2026  
+**Scope:** Current prototype implementation details
 
 ---
 
-## System Overview
+## 1. Architecture Overview
 
-The Practice Settings Dashboard is a React-based application for managing healthcare practice settings with user-specific overrides. It implements a set-theory-based override system ensuring no redundant configurations exist.
+The prototype is a React SPA with a gated auth flow and a single dashboard surface shared by Ops and PM roles.
 
-### Key Features
-- ✅ Practice-wide default settings management
-- ✅ User-specific override system
-- ✅ Lock state management (unlocked, locked-visible, locked-hidden)
-- ✅ Automatic redundancy detection and cleanup
-- ✅ Creation-time validation to prevent matching overrides
-- ✅ Support for multiple setting types (toggles, dropdowns, multiselect, etc.)
-- ✅ Service settings with enabled services + default service
+- Entry: `src/App.js`
+- Auth flow: `src/components/auth/AuthFlow.jsx`
+- Main dashboard surface: `src/PracticeSettingsDashboard.jsx`
+- Access policy helpers: `src/utils/accessPolicy.js`
+- Session helpers: `src/utils/authSession.js`, `src/utils/masterUserSession.js`
+- Practice-scoped persistence:
+  - `src/utils/moduleSettingsStorage.js`
+  - `src/utils/userSettingsOverridesStorage.js`
+  - `src/utils/linkedAccountsStorage.js`
 
-### Technology Stack
-- **Frontend**: React 18.2.0
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
-- **Build Tool**: Create React App
+The current implementation keeps most UI and state transitions in `PracticeSettingsDashboard.jsx`. This is functional but intentionally identified as technical debt.
 
 ---
 
-## Architecture
+## 2. Auth and Session Model
 
-### Core Principle
+### 2.1 Login + MFA
 
-**An override should ONLY exist when it differs from the practice defaults.**
+`AuthFlow` implements a three-step process:
 
-For standard settings:
-- Override = `{value, lockState}` where **BOTH** differ from defaults OR at least one differs
-- When defaults change, check if override matches new defaults
-- If both match → Remove override (redundant)
+1. Credentials (`email`, `password`, selected role tab: `pm` or `ops`)
+2. MFA code validation
+3. Practice resolution (Ops only when multiple practices are available)
 
-For service-settings-combined:
-- Override = `{enabledServices, defaultService, lockState}` where at least one component differs
-- All three components must match for the override to be considered redundant
+Demo data bindings live in `src/data/practices.js`:
 
-### Set Theory Model
+- `opsPracticeAccess` maps Ops users to one or more practices
+- `pmPracticeBinding` maps PM users to exactly one practice
 
-```
-Default Set (D):        {value, lockState}
-Override Set (O):       {value, lockState}
+### 2.2 Auth Session Persistence
 
-Valid Override:   O ≠ D  (at least one component differs)
-Invalid Override: O == D (all components match)
+`src/utils/authSession.js` stores session under:
 
-Constraint: ∀ user overrides O_user, O_user ≠ D
-```
+- `practiceSettingsDashboard.authSession`
 
-### System Flow
+Stored fields:
 
-```
-┌─────────────────────────────────────────────┐
-│            USER ACTIONS                     │
-└─────────────────────────────────────────────┘
-                    │
-        ┌───────────┴──────────────┐
-        │                          │
-   ┌────▼────────┐          ┌──────▼────────┐
-   │   Create    │          │    Modify     │
-   │  Override   │          │   Defaults    │
-   └────┬────────┘          └──────┬────────┘
-        │                          │
-        │ Validation               │ Detection
-        │                          │
-   ┌────▼──────────────┐    ┌──────▼────────────────┐
-   │  Check if matches │    │ Find matching         │
-   │  defaults         │    │ overrides             │
-   └────┬──────────────┘    └──────┬────────────────┘
-        │                          │
-     ┌──▼──┐                  ┌────▼────┐
-     │Block│                  │ Confirm │
-     └─────┘                  └────┬────┘
-                                   │
-                            ┌──────▼──────┐
-                            │   Remove    │
-                            │  Overrides  │
-                            └─────────────┘
-```
+- `email`
+- `role` (`pm` | `ops`)
+- `practiceId`
+- `practiceName`
+- `authenticatedAt`
+
+### 2.3 Ops Active Session (Runtime Gating)
+
+`src/utils/masterUserSession.js` uses a heartbeat-backed local storage record to coordinate cross-tab and same-practice access behavior.
+
+Current key:
+
+- `masterUserSession`
+
+`App.js` sets/clears this session when role changes:
+
+- Ops session starts heartbeat.
+- Non-Ops session clears master session.
+
+`PracticeSettingsDashboard` consumes this state to render PM as read-only when an Ops user is active.
 
 ---
 
-## Data Structures
+## 3. Data Model
 
-### Setting Object
+### 3.1 Settings Object
+
+Each setting record uses current dual-lock fields:
 
 ```javascript
 {
-  id: number,              // Unique identifier
-  name: string,            // Display name
-  type: string,            // 'toggle', 'dropdown', 'multiselect', etc.
-  options: array,          // Available options (for dropdowns, etc.)
-  default: any,            // Default value
-  defaultService: string,  // For service-settings-combined only
-  lockState: string,       // 'unlocked', 'locked-visible', 'locked-hidden'
-  subtext: string,         // Help text
-  dependsOn: object,       // Optional dependency configuration
-  subtexts: object         // Conditional help texts
+  id: number,
+  name: string,
+  type: string,
+  options?: any[],
+  default: any,
+  opsLockState: 'unlocked' | 'locked-visible' | 'locked-hidden',
+  pmLockState: 'unlocked' | 'locked-visible' | 'locked-hidden',
+  defaultService?: string,   // service-settings-combined only
+  dependency?: number,       // optional setting id dependency
+  subtext?: string,
+  subtexts?: Record<string, string>
 }
 ```
 
-### Override Object
+### 3.2 User Override Object
+
+Per user/module/setting override values are stored as:
 
 ```javascript
 {
-  value: any,              // Override value (undefined if not overridden)
-  lockState: string,       // Override lock state (undefined if not overridden)
-  defaultService: string   // For service-settings-combined only
+  value?: any,
+  pmLockState?: 'unlocked' | 'locked-visible' | 'locked-hidden',
+  defaultService?: string
 }
 ```
 
-### Storage Key Format
+Composite in-memory key format:
 
 ```javascript
-// User setting overrides are stored with composite keys:
 `${userId}-${moduleId}-${settingId}`
-
-// Example: "1-email-22" for user 1, email module, setting 22
 ```
 
----
+### 3.3 Linked Assignment Record
 
-## Key Components
+Linked assignments normalize both legacy and current fields through helper functions in `src/utils/linkedAssignments.js`.
 
-### 1. PracticeSettingsDashboard (Main Component)
+Canonical fields in new records:
 
-**Location**: `src/PracticeSettingsDashboard.jsx`
-
-**Responsibilities**:
-- Manages all state (settings, overrides, users, modals)
-- Coordinates validation and override operations
-- Renders all UI components
-
-**Key State Variables**:
 ```javascript
-const [moduleSettings, setModuleSettings] = useState({})
-const [userSettingsOverrides, setUserSettingsOverrides] = useState({})
-const [selectedUser, setSelectedUser] = useState(null)
-const [showAddOverrideModal, setShowAddOverrideModal] = useState(false)
-const [showOverrideCleanupModal, setShowOverrideCleanupModal] = useState(false)
-```
-
-### 2. SettingRow Component
-
-**Location**: `src/PracticeSettingsDashboard.jsx` (lines 2530+)
-
-**Responsibilities**:
-- Renders individual setting rows
-- Handles inline value/lock state changes
-- Triggers validation on user changes
-- Supports both practice defaults and user overrides
-
-### 3. AddOverrideModal Component
-
-**Location**: `src/PracticeSettingsDashboard.jsx` (lines 1308+)
-
-**Responsibilities**:
-- Allows adding new user overrides
-- Validates before saving
-- Shows inline error messages for validation failures
-- Handles all setting types including service-settings-combined
-
-**Key Features**:
-- User selection dropdown
-- Setting value input (type-specific)
-- Lock state selector
-- Inline validation error display
-- Auto-clears error on user input
-
-### 4. OverrideCleanupModal Component
-
-**Location**: `src/PracticeSettingsDashboard.jsx` (lines 1091+)
-
-**Responsibilities**:
-- Shows users affected when defaults change
-- Lists overrides that will be removed
-- Confirms before removing redundant overrides
-
----
-
-## Validation System
-
-### Overview
-
-The validation system prevents creation of overrides that match practice defaults. It operates at multiple checkpoints:
-
-1. **AddOverrideModal** - Validates before save, shows inline error
-2. **Inline Value Changes** - Validates during user interaction, shows browser alert
-3. **Inline Lock Changes** - Validates during user interaction, shows browser alert
-
-### Validation Functions
-
-#### `doesOverrideMatchDefault(userId, moduleId, settingId, newValue, newLockState, newDefaultService)`
-
-**Location**: Lines 212-234
-
-**Purpose**: Checks if a potential override would match the practice defaults
-
-**Parameters**:
-- `userId` - User ID to check
-- `moduleId` - Module identifier
-- `settingId` - Setting identifier
-- `newValue` - Proposed override value (undefined to use current)
-- `newLockState` - Proposed lock state (undefined to use current)
-- `newDefaultService` - For service-settings-combined only
-
-**Returns**: `boolean` - True if override matches defaults
-
-**Algorithm**:
-```javascript
-1. Get setting configuration
-2. Get current override (if exists)
-3. Calculate effective value (new || current || default)
-4. Calculate effective lock state (new || current || default)
-5. Compare effective value with default (using valuesAreEqual)
-6. Compare effective lock state with default
-7. For service-settings-combined:
-   a. Calculate effective default service
-   b. Compare with default service
-   c. Return true only if ALL THREE match
-8. For other types:
-   a. Return true only if BOTH value and lock match
-```
-
-### Helper Functions
-
-#### `valuesAreEqual(value1, value2)`
-
-**Location**: `src/utils/validationHelpers.js`
-
-**Purpose**: Compare two values, handling arrays properly
-
-**Implementation**:
-```javascript
-- If both are arrays: Sort and JSON stringify for comparison
-- Otherwise: Use strict equality (===)
-```
-
-#### `formatLockStateDisplay(lockState)`
-
-**Location**: `src/utils/validationHelpers.js`
-
-**Purpose**: Convert lock state to user-friendly string
-
-**Mapping**:
-- `unlocked` → "Unlocked"
-- `locked-visible` → "Locked (Visible)"
-- `locked-hidden` → "Locked (Hidden)"
-
-#### `formatValueDisplay(value)`
-
-**Location**: `src/utils/validationHelpers.js`
-
-**Purpose**: Format values for display
-
-**Implementation**:
-- Arrays: Join with ", "
-- Primitives: Convert to string
-
-#### `getMatchingOverrideAlertMessage(value, lockState)`
-
-**Location**: `src/utils/validationHelpers.js`
-
-**Purpose**: Generate consistent error messages
-
-**Returns**: Multi-line string with formatted error details
-
----
-
-## Override Management
-
-### Creating Overrides
-
-**Flow**:
-```
-1. User opens AddOverrideModal
-2. User selects target user
-3. User sets override value and lock state
-4. User clicks "Add Override"
-5. System validates (doesOverrideMatchDefault)
-6. If valid: Save override
-7. If invalid: Show inline error, block save
-```
-
-**Code Location**: Lines 1308-1832 (AddOverrideModal)
-
-### Detecting Redundant Overrides
-
-#### `detectRedundantOverrides(moduleId, settingId, newDefaultValue, settingType, isLockStateChange)`
-
-**Location**: Lines 114-156
-
-**Purpose**: Find overrides that match new defaults when practice defaults change
-
-**Algorithm**:
-```javascript
-1. Get setting configuration
-2. Iterate through all user overrides for this setting
-3. For each override:
-   a. Calculate new default value/lock state
-   b. Get override's current value/lock state
-   c. Use valuesAreEqual to compare value
-   d. Compare lock states
-   e. If BOTH match: Add to redundant list
-4. Return list of redundant overrides with user details
-```
-
-**Returns**: Array of objects:
-```javascript
-[{
-  userId: string,
-  userName: string,
-  value: any,
-  lockState: string
-}]
-```
-
-### Removing Overrides
-
-#### `removeMultipleOverrides(overridesToRemove, moduleId, settingId)`
-
-**Location**: Lines 168-179
-
-**Purpose**: Remove multiple overrides at once (used after cleanup confirmation)
-
-**Implementation**:
-```javascript
-1. Clone userSettingsOverrides state
-2. For each override in list:
-   a. Build composite key: ${userId}-${moduleId}-${settingId}
-   b. Delete entry from cloned state
-3. Update state with cleaned object
-```
-
-#### `removeUserSetting(userId, moduleId, settingId)`
-
-**Location**: Lines 97-110
-
-**Purpose**: Remove a single user override
-
-**Implementation**:
-```javascript
-1. Build composite key
-2. Clone userSettingsOverrides
-3. Delete entry
-4. Update state
-```
-
-### Cleanup Workflow
-
-```
-1. PM changes practice default value/lock state
-   ↓
-2. updateSettingState() is called
-   ↓
-3. detectRedundantOverrides() finds matches
-   ↓
-4. If matches found:
-   a. Show OverrideCleanupModal
-   b. List affected users
-   c. Wait for confirmation
-   ↓
-5. On confirm:
-   a. removeMultipleOverrides()
-   b. Update practice default
-   c. Close modal
-   ↓
-6. On cancel:
-   a. Don't change anything
-   b. Close modal
+{
+  linkId: string,
+  assigneeUserId: string | number,
+  assigneeType: 'primary' | 'secondary',
+  assignmentType: 'assistant' | 'coverage',
+  linkedToDoctorId: string | number,
+  linkedToDoctorName: string
+}
 ```
 
 ---
 
-## API Reference
+## 4. Access Control Rules in Code
 
-### Core Functions
+### 4.1 Ops -> PM
 
-#### `setUserSetting(userId, moduleId, settingId, property, value)`
+`src/utils/accessPolicy.js`:
 
-**Purpose**: Create or update a user override
+- `canPMSeeSetting(setting)`: false when `opsLockState === 'locked-hidden'`
+- `canPMEditSetting(setting)`: true only when `opsLockState === 'unlocked'`
 
-**Parameters**:
-- `userId` - Target user ID
-- `moduleId` - Module identifier
-- `settingId` - Setting identifier
-- `property` - 'value', 'lockState', or 'defaultService'
-- `value` - New value for the property
+`PracticeSettingsDashboard` additionally blocks PM edits when:
 
-**Side Effects**: Updates `userSettingsOverrides` state
+- PM is in read-only mode due to active Ops session
+- Setting dependency is not enabled
+- Parent/dependency setting is effectively Ops-locked
 
----
+### 4.2 PM -> Doctor
 
-#### `getUserSetting(userId, moduleId, settingId)`
-
-**Purpose**: Retrieve a user's override for a specific setting
-
-**Parameters**:
-- `userId` - User ID
-- `moduleId` - Module identifier
-- `settingId` - Setting identifier
-
-**Returns**: Override object or undefined
+`pmLockState` is applied at default and override levels. Override lock is independent from default lock.
 
 ---
 
-#### `getSettingOverrides(moduleId, settingId)`
+## 5. Override Lifecycle
 
-**Purpose**: Get all user overrides for a specific setting
+Core behavior in `PracticeSettingsDashboard`:
 
-**Parameters**:
-- `moduleId` - Module identifier
-- `settingId` - Setting identifier
+- Create/update override via in-memory map keyed by `${userId}-${moduleId}-${settingId}`
+- Block creation when override equals default tuple
+- On default changes (`default` or `pmLockState`), detect redundant overrides
+- Show confirmation modal before removing redundant overrides
+- Remove only matching redundant entries
 
-**Returns**: Array of override objects with user details
+For `service-settings-combined`, redundancy check includes:
 
----
-
-#### `updateSettingState(moduleId, settingId, property, value)`
-
-**Purpose**: Update practice-wide default value or lock state
-
-**Parameters**:
-- `moduleId` - Module identifier
-- `settingId` - Setting identifier
-- `property` - 'default' or 'lockState'
-- `value` - New value
-
-**Side Effects**:
-- May trigger override cleanup detection
-- May show OverrideCleanupModal
-- Updates `moduleSettings` state
+- `value` (enabled services)
+- `pmLockState`
+- `defaultService`
 
 ---
 
-## Testing Guide
+## 6. Persistence Keys
 
-### Manual Testing Checklist
+All settings/overrides/assignments are practice-scoped:
 
-#### Override Creation Validation
+- Module settings: `practiceSettingsDashboard.moduleSettings.<practiceId>`
+- User overrides: `practiceSettingsDashboard.userSettingsOverrides.<practiceId>`
+- Linked assignments: `practiceSettingsDashboard.linkedAccounts.<practiceId>`
 
-- [ ] Try creating override with same value and lock state as default → Should block with error
-- [ ] Try creating override with different value, same lock → Should allow
-- [ ] Try creating override with same value, different lock → Should allow
-- [ ] Try creating override with different value and lock → Should allow
-- [ ] For service-settings-combined: Verify all three components checked
+Auth session is global:
 
-#### Override Cleanup
-
-- [ ] Change default value → Should detect matching overrides
-- [ ] Change lock state → Should detect matching overrides
-- [ ] Confirm cleanup → Overrides should be removed
-- [ ] Cancel cleanup → Nothing should change
-
-#### Inline Error Messages
-
-- [ ] Error appears in modal when validation fails
-- [ ] Error clears when user changes any input
-- [ ] Error clears when modal closes
-- [ ] Error message is readable and informative
-
-### Test Scenarios
-
-#### Scenario 1: Simple Override Creation
-```
-Setup:
-- Practice default: {value: "They", lockState: "unlocked"}
-
-Test:
-- Select user
-- Set value: "They"
-- Set lock: "unlocked"
-- Click "Add Override"
-
-Expected: Error message shown, save blocked
-```
-
-#### Scenario 2: Partial Match (Value)
-```
-Setup:
-- Practice default: {value: "They", lockState: "unlocked"}
-
-Test:
-- Select user
-- Set value: "They"
-- Set lock: "locked-visible"
-- Click "Add Override"
-
-Expected: Override created successfully
-```
-
-#### Scenario 3: Default Change Cleanup
-```
-Setup:
-- Practice default: {value: "They", lockState: "unlocked"}
-- User A override: {value: "He", lockState: "unlocked"}
-- User B override: {value: "They", lockState: "locked-visible"}
-
-Test:
-- Change practice default value to "He"
-
-Expected:
-- Modal shows User A will be affected
-- After confirmation, User A override removed
-- User B override remains
-```
-
-#### Scenario 4: Service Settings Combined
-```
-Setup:
-- Default: {enabledServices: ["Outpatient"], defaultService: "Outpatient", lockState: "unlocked"}
-
-Test:
-- Select user
-- Set enabled: ["Outpatient"]
-- Set default: "Outpatient"
-- Set lock: "unlocked"
-
-Expected: Error, all three match default
-```
+- `practiceSettingsDashboard.authSession`
 
 ---
 
-## Common Issues and Solutions
+## 7. Cross-Tab Synchronization
 
-### Issue: Override Not Being Blocked
+The prototype uses:
 
-**Symptom**: User can create override matching defaults
+- `storage` events
+- custom event `masterUserSessionChange`
 
-**Possible Causes**:
-1. Validation not called before save
-2. Array comparison not working correctly
-3. Service-settings-combined missing defaultService check
-
-**Solution**:
-- Check `doesOverrideMatchDefault` is called before `setUserSetting`
-- Verify `valuesAreEqual` handles arrays with `.sort()`
-- For service-settings-combined, ensure `newDefaultService` parameter passed
+This allows tabs to reflect Ops activity changes and storage updates without full reload.
 
 ---
 
-### Issue: Cleanup Not Detecting Overrides
+## 8. Known Technical Debt
 
-**Symptom**: Modal doesn't show when changing defaults
-
-**Possible Causes**:
-1. `detectRedundantOverrides` not called
-2. `isLockStateChange` parameter incorrect
-3. Comparison logic error
-
-**Solution**:
-- Verify `updateSettingState` calls `detectRedundantOverrides`
-- Check `isLockStateChange` flag is set correctly
-- Debug comparison logic with console.logs
+1. `src/PracticeSettingsDashboard.jsx` is very large and combines concerns (state, business rules, rendering, modals).
+2. Rendering logic and business rules are still concentrated in the dashboard component even though seed/config data is now externalized.
+3. Prototype user directory mutations (Add User flow) are in-memory only.
+4. Linked assignment storage key still uses `linkedAccounts` naming for backward compatibility.
 
 ---
 
-### Issue: Error Message Not Clearing
+## 9. Refactor Status and Remaining Work
 
-**Symptom**: Validation error persists after user changes input
+### 9.1 Completed in Current Branch
 
-**Possible Causes**:
-1. useEffect dependencies missing
-2. State not updating
-3. Effect condition wrong
+The following cleanup work has been completed:
 
-**Solution**:
-- Check useEffect dependencies include all relevant state
-- Verify `setValidationError('')` is called
-- Ensure `if (validationError)` condition works correctly
+1. Data extraction into `src/data/*` for seed/config sources.
+2. Utility extraction into `src/utils/*` for shared helpers (time options, normalization, service repair, validation, storage helpers).
+3. Modal decomposition from `PracticeSettingsDashboard.jsx` into dedicated files under `src/components/dashboard/*`.
+4. `SettingRow` extraction into `src/components/dashboard/SettingRow.jsx`.
 
----
+### 9.2 Remaining Technical Debt
 
-## Performance Considerations
+1. `PracticeSettingsDashboard.jsx` still orchestrates most state transitions and cross-feature business logic.
+2. Lock-state editing controls are not fully surfaced in the extracted `SettingRow` UI (current row emphasizes value controls and override flows).
+3. Behavior-heavy logic would benefit from custom hooks/services:
+   - `useOverrideRules`
+   - `useSettingsPersistence`
+   - `useOpsPmAccess`
+4. Unit tests are still needed for:
+   - redundancy detection
+   - lock state access gates
+   - linked assignment duplicate detection
 
-### State Updates
-
-- Override storage uses composite keys for O(1) lookup
-- `detectRedundantOverrides` iterates all overrides: O(n) where n = total overrides
-- Validation checks are O(1) for single override
-
-### Optimization Opportunities
-
-1. **Memoization**: Use `useMemo` for expensive calculations
-2. **Callback Optimization**: Use `useCallback` for event handlers
-3. **Component Splitting**: Extract large components to reduce re-renders
-4. **Virtual Scrolling**: For large lists of settings/users
-
----
-
-## Security Considerations
-
-### Data Validation
-
-- All user input should be validated before storage
-- Lock states restrict editing capabilities
-- Override validation prevents data inconsistency
-
-### Access Control
-
-- Lock states: `locked-hidden` prevents viewing/editing
-- Lock states: `locked-visible` allows viewing, prevents editing
-- Lock states: `unlocked` allows full access
-
----
-
-## Future Enhancements
-
-### Planned Features
-
-1. **Bulk Operations**: Apply override to multiple users at once
-2. **Override Templates**: Save common override configurations
-3. **Audit Trail**: Track who changed what and when
-4. **Import/Export**: Bulk import/export of settings
-5. **Dependency Management**: Better handling of dependent settings
-6. **Search/Filter**: Search settings and overrides
-7. **Undo/Redo**: Support undo for changes
-
-### Technical Debt
-
-1. **Component Extraction**: Split PracticeSettingsDashboard into smaller components
-2. **Type Safety**: Add TypeScript for better type checking
-3. **Testing**: Add unit and integration tests
-4. **Error Handling**: More robust error handling and user feedback
-5. **API Integration**: Connect to backend API for persistence
-
----
-
-*Last Updated: November 24, 2025*
-*Version: 2.0*

@@ -145,6 +145,59 @@ export const initialLinkedAccounts = [
 ];
 
 /**
+ * Initial linked assignment records used by the dashboard prototype.
+ * This mirrors the richer linked-assignment shape used in current UI flows.
+ *
+ * @constant {Array<Object>}
+ */
+export const initialLinkedAssignments = [
+  {
+    linkId: 'link_lisa_seed',
+    assigneeUserId: 'lisa_parker',
+    assigneeType: 'secondary',
+    assignmentType: 'assistant',
+    secondaryUserId: 'lisa_parker',
+    id: 'lisa_parker',
+    name: 'Lisa Parker, RN',
+    role: 'Cardiology Nurse',
+    email: 'lisa.parker@clinic.com',
+    permissions: {
+      createConsults: true,
+      mergeAndLinkAppointments: false,
+      canGenerateNotes: false,
+      editGeneratedNotes: false,
+      pushToEHR: false
+    },
+    linkedToDoctorId: 1,
+    linkedToDoctorName: 'Dr. Sarah Johnson',
+    startDate: '2026-03-01',
+    endDate: '2026-03-31'
+  },
+  {
+    linkId: 'link_jennifer_seed',
+    assigneeUserId: 'jennifer_walsh',
+    assigneeType: 'secondary',
+    assignmentType: 'assistant',
+    secondaryUserId: 'jennifer_walsh',
+    id: 'jennifer_walsh',
+    name: 'Jennifer Walsh',
+    role: 'Medical Assistant',
+    email: 'jennifer.walsh@clinic.com',
+    permissions: {
+      createConsults: true,
+      mergeAndLinkAppointments: false,
+      canGenerateNotes: true,
+      editGeneratedNotes: true,
+      pushToEHR: false
+    },
+    linkedToDoctorId: 2,
+    linkedToDoctorName: 'Dr. Michael Chen',
+    startDate: '2026-03-05',
+    endDate: '2026-04-05'
+  }
+];
+
+/**
  * Initial deleted consults data
  * Stores information about deleted consultations that can be retrieved
  *
