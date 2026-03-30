@@ -4,7 +4,7 @@ A complete React application for managing healthcare practice settings and user 
 
 ## Features
 
-- ✅ Complete Settings System (24+ settings across 5 modules)
+- ✅ Complete Settings System (23 settings across 6 modules)
 - ✅ User Management (Doctors and Secondary Accounts)
 - ✅ Global Permissions Management
 - ✅ Account Suspension and PIN Reset
@@ -23,7 +23,7 @@ A complete React application for managing healthcare practice settings and user 
 
 2. **Open terminal/command prompt** and navigate to the project folder:
    ```bash
-   cd settings_dashboard
+   cd Marvix_setting
    ```
 
 3. **Install dependencies**:
@@ -51,14 +51,26 @@ A complete React application for managing healthcare practice settings and user 
 ## Project Structure
 
 ```
-settings_dashboard/
+Marvix_setting/
 ├── public/
 │   └── index.html
 ├── src/
 │   ├── App.js
+│   ├── PracticeSettingsDashboard.jsx
+│   ├── components/
+│   │   ├── auth/
+│   │   ├── dashboard/
+│   │   └── layout/
+│   ├── data/
+│   ├── utils/
 │   ├── index.js
-│   ├── index.css
-│   └── PracticeSettingsDashboard.jsx
+│   └── index.css
+├── docs/
+│   ├── PRD_SIMPLIFIED.md
+│   ├── TECHNICAL_DOCUMENTATION.md
+│   ├── ACCESS_INHERITANCE_RULES.md
+│   └── non-practice-manager/
+│       └── ICD_CODE_IMPLEMENTATION.md
 ├── package.json
 └── README.md
 ```
@@ -72,7 +84,7 @@ settings_dashboard/
 
 ## Usage
 
-1. **Settings Management**: Click "Settings Setup" to configure practice-wide settings
+1. **Settings Management**: Use Settings to configure practice-wide defaults and lock behavior
 2. **User Management**: Click "User Management" to manage doctors and secondary accounts
 3. **Global Permissions**: Select secondary accounts to configure their permissions
 4. **Account Actions**: Use "Manage Access" tab to suspend accounts or reset PINs

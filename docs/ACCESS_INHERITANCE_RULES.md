@@ -47,10 +47,11 @@ These rules apply to **PM behavior only**. Ops is not restricted by `opsLockStat
 - **Override cleanup**: when Ops changes a setting from `opsLockState: unlocked` → `locked-hidden`, the system warns and removes all existing doctor overrides for that setting (so there are no hidden-but-still-effective overrides).
 
 ### `opsLockState = locked-visible`
-- **PM**: sees the setting but is **read-only**
+- **PM**: sees the setting with **lock-state-only access**
   - cannot change `default`
-  - cannot change `pmLockState`
-  - cannot create/edit doctor overrides for that setting
+  - cannot change `defaultService`
+  - can only change `pmLockState` between `locked-visible` and `locked-hidden`
+  - for doctor overrides, can only set override `pmLockState` to `locked-visible` or `locked-hidden`
 - **Ops**: can still see and edit the setting
 
 ### `opsLockState = unlocked`
@@ -81,9 +82,27 @@ Standard settings:
 - tuple includes `(enabledServices, defaultService, pmLockState)`
 - all components must match to be considered redundant
 
+## PM dead-end recovery: Request Ops restore
+
+To avoid dead-end friction when PM applies additional restrictions:
+- PM can submit a **Request Ops restore** from setting/override surfaces.
+- Requests are stored per practice with:
+  - `requestId`, `createdAt`, `createdByEmail`
+  - `moduleId`, `settingId`, optional `targetUserId`
+  - `scope` (`default` or `override`)
+  - `currentState`, `requestedState`
+  - `reason`
+  - `status` (`open`, `resolved`, `dismissed`)
+- Ops sees pending requests in a lightweight queue and can:
+  - **Apply restore** (unlocks Ops lock for the target setting)
+  - **Dismiss** request
+
 ## Ops overrides (current simplification)
 
-Ops (Master) can use the same doctor override system, but **only** when the setting is `opsLockState = unlocked` (same constraint as PM for simplicity).
+Ops (Master) cannot create, edit, or remove doctor overrides.
+
+- Ops can review override summaries in read-only mode.
+- Ops is responsible for defaults and `opsLockState`.
 
 ## Authentication and session model (implemented)
 

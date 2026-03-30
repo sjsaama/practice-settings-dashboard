@@ -141,28 +141,17 @@ export const settingsModules = {
       },
       {
         id: 22,
-        name: 'Send Note on Email',
-        type: 'toggle',
+        name: 'Email Delivery',
+        type: 'email-delivery-combined',
         options: ['True', 'False'],
-        default: 'False',
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtexts: {
-          'True': '',
-          'False': 'Enable only if your email complies with Privacy and Data Protection laws'
+        default: {
+          sendNote: 'False',
+          sendTranscript: 'False'
         },
-        requiresAttestation: true
-      },
-      {
-        id: 23,
-        name: 'Send Transcript in Email',
-        type: 'toggle',
-        options: ['True', 'False'],
-        default: 'False',
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: '',
-        dependency: 22
+        subtext: 'Enable only if your email complies with Privacy and Data Protection laws',
+        requiresAttestation: true
       },
       {
         id: 24,
@@ -263,6 +252,23 @@ export const settingsModules = {
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
         subtext: 'Automatically push completed notes to EHR system'
+      },
+      {
+        id: 78,
+        name: 'Appointment Allowlist',
+        type: 'keyword-list',
+        options: [
+          'Initial Consultation',
+          'Follow-up',
+          'Annual Checkup',
+          'Routine Checkup',
+          'Physical Examination',
+          'Lab Results Review'
+        ],
+        default: [],
+        opsLockState: 'unlocked', // Ops controls PM access
+        pmLockState: 'unlocked',  // PM controls doctor access
+        subtext: 'Add appointment words/phrases to show. If none are added, all types are shown.'
       }
     ]
   },
@@ -270,6 +276,27 @@ export const settingsModules = {
     name: 'EHR Settings - Athena',
     subtitle: 'Settings that control Athena EHR integration and synchronization',
     settings: [
+      {
+        id: 84,
+        name: 'Enable Athena Embedded App',
+        type: 'toggle',
+        options: ['Yes', 'No'],
+        default: 'No',
+        opsLockState: 'unlocked', // Ops controls PM access
+        pmLockState: 'unlocked',  // PM controls doctor access
+        subtext: 'Allow users to access the Athena embedded app'
+      },
+      {
+        id: 85,
+        name: 'Auto Pull In Embedded App',
+        type: 'toggle',
+        options: ['Yes', 'No'],
+        default: 'No',
+        opsLockState: 'unlocked', // Ops controls PM access
+        pmLockState: 'unlocked',  // PM controls doctor access
+        dependency: 84,
+        subtext: 'Automatically pull appointment context when opening the embedded app'
+      },
       {
         id: 83,
         name: 'Daily appointment sync time',
@@ -306,25 +333,21 @@ export const settingsModules = {
         subtext: 'Automatically push completed notes to EHR system'
       },
       {
-        id: 88,
-        name: 'Document Types to Pull From EHR',
-        type: 'multiselect',
+        id: 89,
+        name: 'Appointment Allowlist',
+        type: 'keyword-list',
         options: [
-          'Lab Reports',
-          'Discharge Summary',
-          'Radiology Reports',
-          'Pathology Reports',
-          'Consultation Notes',
-          'Operative Reports',
-          'Progress Notes',
-          'Medication Lists',
-          'Immunization Records',
-          'Imaging Studies'
+          'Initial Consultation',
+          'Follow-up',
+          'Annual Checkup',
+          'Routine Checkup',
+          'Physical Examination',
+          'Lab Results Review'
         ],
-        default: ['Lab Reports', 'Discharge Summary', 'Radiology Reports'],
+        default: [],
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Select which document types should be automatically pulled from the EHR'
+        subtext: 'Add appointment words/phrases to show. If none are added, all types are shown.'
       }
     ]
   },

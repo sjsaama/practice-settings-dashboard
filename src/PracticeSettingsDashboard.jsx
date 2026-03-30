@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Settings, Users, ChevronRight, Search, Shield, RotateCcw } from 'lucide-react';
 import BlockedAccessScreen from './components/layout/BlockedAccessScreen';
 import {
@@ -11,8 +11,6 @@ import {
   HipaaEmailConfirmModal,
   OverrideConfirmModal,
   OverrideCleanupModal,
-  OpsHideOverridesModal,
-  OpsLockVisibleOverridesModal,
 } from './components/dashboard/AdvancedModals';
 import UserTypeModal from './components/dashboard/UserTypeModal';
 import LinkedAssignmentModal from './components/dashboard/LinkedAssignmentModal';
@@ -26,7 +24,11 @@ import {
   canPMAccess,
   onMasterUserSessionChange
 } from './utils/masterUserSession';
-import { canPMEditSetting } from './utils/accessPolicy';
+import {
+  canPMEditSetting,
+  canPMSetDefaultLockState,
+  canPMSetOverrideLockState,
+} from './utils/accessPolicy';
 import {
   getModuleSettingsStorageKey,
   loadModuleSettingsFromStorage,
@@ -37,6 +39,11 @@ import {
   loadUserSettingsOverridesFromStorage,
   saveUserSettingsOverridesToStorage,
 } from './utils/userSettingsOverridesStorage';
+import {
+  getOpsRestoreRequestsStorageKey,
+  loadOpsRestoreRequestsFromStorage,
+  saveOpsRestoreRequestsToStorage,
+} from './utils/opsRestoreRequestsStorage';
 import {
   loadLinkedAccountsFromStorage,
   saveLinkedAccountsToStorage,
@@ -54,7 +61,102 @@ import {
   getMatchingOverrideAlertMessage
 } from './utils/validationHelpers';
 import { normalizeDependentSettings } from './utils/settingsNormalization';
+import {
+  filterAppointmentsByAllowlist,
+  getAppointmentAllowlist,
+} from './utils/appointmentAllowlist';
 import { seededLinkedAssignmentCandidates } from './data/linkedAssignmentCandidates';
+
+const mergeModuleSettingsWithSeed = (seededModules, savedModules) => {
+  if (!savedModules || typeof savedModules !== 'object') {
+    return seededModules;
+  }
+
+  const normalizeLockState = (value) => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const normalized = trimmed.toLowerCase().replace(/\s+/g, '-').replace(/\(|\)/g, '');
+
+    if (normalized === 'locked-visible' || normalized === 'locked-visible-visible') return 'locked-visible';
+    if (normalized === 'locked-hidden' || normalized === 'locked-hidden-hidden') return 'locked-hidden';
+    if (normalized === 'unlocked') return 'unlocked';
+
+    // Allow "locked-visible" / "locked-hidden" embedded in labels (e.g. "locked-visible" already)
+    if (normalized.includes('locked') && normalized.includes('visible')) return 'locked-visible';
+    if (normalized.includes('locked') && normalized.includes('hidden')) return 'locked-hidden';
+    return undefined;
+  };
+
+  const merged = Object.fromEntries(
+    Object.entries(seededModules).map(([moduleId, seededModule]) => {
+      const savedModule = savedModules[moduleId];
+      if (!savedModule || !Array.isArray(savedModule.settings)) {
+        return [moduleId, seededModule];
+      }
+
+      const mergedSettings = seededModule.settings.map((seededSetting) => {
+        const savedSetting = savedModule.settings.find((s) => s.id === seededSetting.id);
+        if (!savedSetting) return seededSetting;
+
+        const mergedDefault = (() => {
+          if (seededSetting.type !== 'email-delivery-combined') {
+            return savedSetting.default !== undefined ? savedSetting.default : seededSetting.default;
+          }
+
+          const incoming = savedSetting.default;
+          if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+            return {
+              sendNote: incoming === 'True' ? 'True' : 'False',
+              sendTranscript: 'False',
+            };
+          }
+
+          return {
+            sendNote: incoming.sendNote === 'True' ? 'True' : 'False',
+            sendTranscript: incoming.sendTranscript === 'True' ? 'True' : 'False',
+          };
+        })();
+
+        return {
+          ...seededSetting,
+          default: mergedDefault,
+          opsLockState: normalizeLockState(savedSetting.opsLockState) ?? seededSetting.opsLockState ?? 'unlocked',
+          pmLockState: normalizeLockState(savedSetting.pmLockState) ?? seededSetting.pmLockState ?? 'unlocked',
+          defaultService: savedSetting.defaultService !== undefined
+            ? savedSetting.defaultService
+            : seededSetting.defaultService,
+        };
+      });
+
+      return [
+        moduleId,
+        {
+          ...seededModule,
+          settings: mergedSettings,
+        },
+      ];
+    })
+  );
+
+  return merged;
+};
+
+const needsSeedMerge = (seededModules, currentModules) => {
+  if (!currentModules || typeof currentModules !== 'object') return true;
+
+  for (const [moduleId, seededModule] of Object.entries(seededModules)) {
+    const currentModule = currentModules[moduleId];
+    if (!currentModule || !Array.isArray(currentModule.settings)) return true;
+
+    for (const seededSetting of seededModule.settings) {
+      const exists = currentModule.settings.some((setting) => setting.id === seededSetting.id);
+      if (!exists) return true;
+    }
+  }
+
+  return false;
+};
 
 const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLogout }) => {
   // Auth (provided by App)
@@ -121,11 +223,9 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   const [pendingCrossTabModuleSettings, setPendingCrossTabModuleSettings] = useState(null);
   const [showCrossTabOverridesBanner, setShowCrossTabOverridesBanner] = useState(false);
   const [pendingCrossTabOverrides, setPendingCrossTabOverrides] = useState(null);
+  const [showCrossTabRestoreRequestsBanner, setShowCrossTabRestoreRequestsBanner] = useState(false);
+  const [pendingCrossTabRestoreRequests, setPendingCrossTabRestoreRequests] = useState(null);
   const [crossTabToast, setCrossTabToast] = useState(null);
-  const [showOpsHideOverridesModal, setShowOpsHideOverridesModal] = useState(false);
-  const [opsHideOverridesData, setOpsHideOverridesData] = useState(null);
-  const [showOpsLockVisibleOverridesModal, setShowOpsLockVisibleOverridesModal] = useState(false);
-  const [opsLockVisibleOverridesData, setOpsLockVisibleOverridesData] = useState(null);
   const [userSettingsOverrides, setUserSettingsOverrides] = useState(() => {
     const saved = loadUserSettingsOverridesFromStorage(practiceId);
     return saved || {};
@@ -138,6 +238,10 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     return initialLinkedAssignments.map((assignment) => ({ ...assignment }));
   });
   const [allUsers, setAllUsers] = useState(() => initialUsers.map((user) => ({ ...user })));
+  const [opsRestoreRequests, setOpsRestoreRequests] = useState(() => {
+    const saved = loadOpsRestoreRequestsFromStorage(practiceId);
+    return saved || [];
+  });
 
   const [showAddSecondaryAccountModal, setShowAddSecondaryAccountModal] = useState(false);
   const [newSecondaryAccount, setNewSecondaryAccount] = useState({
@@ -155,16 +259,34 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
   // Initialize moduleSettings with lazy initializer
   const [moduleSettings, setModuleSettings] = useState(() => {
+    const seededModules = JSON.parse(JSON.stringify(initialSettingsModules));
     const saved = loadModuleSettingsFromStorage(practiceId);
-    if (saved) return saved;
+    if (saved) {
+      return mergeModuleSettingsWithSeed(seededModules, saved);
+    }
+
     // Clone seeded module config so in-component updates don't mutate shared constants.
-    return JSON.parse(JSON.stringify(initialSettingsModules));
+    return seededModules;
   });
 
   // Persist module settings so Ops changes apply to PM sessions/tabs
   useEffect(() => {
     saveModuleSettingsToStorage(moduleSettings, practiceId);
   }, [moduleSettings, practiceId]);
+
+  // Ensure newly seeded settings appear for existing in-memory/storage payloads.
+  useEffect(() => {
+    const seededModules = JSON.parse(JSON.stringify(initialSettingsModules));
+    setModuleSettings((prevModuleSettings) => {
+      const needsMerge = needsSeedMerge(seededModules, prevModuleSettings);
+
+      if (!needsMerge) return prevModuleSettings;
+
+      const merged = mergeModuleSettingsWithSeed(seededModules, prevModuleSettings);
+
+      return merged;
+    });
+  }, [practiceId]);
 
   // Persist user overrides so behavior is consistent across sessions/tabs
   useEffect(() => {
@@ -175,6 +297,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   useEffect(() => {
     saveLinkedAccountsToStorage(linkedAccounts, practiceId);
   }, [linkedAccounts, practiceId]);
+
+  // Persist Ops restore requests per practice
+  useEffect(() => {
+    saveOpsRestoreRequestsToStorage(opsRestoreRequests, practiceId);
+  }, [opsRestoreRequests, practiceId]);
 
   // Normalize dependent settings to avoid invalid defaults (no updates during render)
   useEffect(() => {
@@ -277,6 +404,52 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     showResetPinModal
   ]);
 
+  // Cross-tab sync for Ops restore requests
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key !== getOpsRestoreRequestsStorageKey(practiceId)) return;
+      if (!event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue);
+        if (!Array.isArray(parsed)) return;
+
+        const isMidFlow =
+          showAddOverrideModal ||
+          showOverrideCleanupModal ||
+          showOverrideConfirmModal ||
+          showAddSecondaryAccountModal ||
+          showAddPrimaryAccountModal ||
+          showLinkAccountModal ||
+          showSuspendModal ||
+          showResetPinModal;
+
+        if (isMidFlow) {
+          setPendingCrossTabRestoreRequests(parsed);
+          setShowCrossTabRestoreRequestsBanner(true);
+          return;
+        }
+
+        setOpsRestoreRequests(parsed);
+        setCrossTabToast('Restore requests updated in another tab.');
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [
+    practiceId,
+    showAddOverrideModal,
+    showOverrideCleanupModal,
+    showOverrideConfirmModal,
+    showAddSecondaryAccountModal,
+    showAddPrimaryAccountModal,
+    showLinkAccountModal,
+    showSuspendModal,
+    showResetPinModal
+  ]);
+
   // Auto-clear cross-tab toast
   useEffect(() => {
     if (!crossTabToast) return;
@@ -332,6 +505,40 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     }
   }, [selectedUser]);
 
+  // ==================== DERIVED DATA (DO NOT CALL CONDITIONALLY) ====================
+  const openOpsRestoreRequests = useMemo(
+    () => opsRestoreRequests.filter((request) => request.status === 'open'),
+    [opsRestoreRequests]
+  );
+
+  const availableLinkedAssignmentUsers = buildLinkedAssignmentCandidates(
+    allUsers,
+    selectedUser?.id,
+    seededLinkedAssignmentCandidates
+  );
+
+  const selectedLinkedAssignmentUser = availableLinkedAssignmentUsers.find(
+    (u) => String(u.id) === String(selectedNewUser)
+  );
+
+  const activeEhrModuleKey = useMemo(() => {
+    const athenaSetting = moduleSettings['ehr-settings-athena']?.settings?.find(
+      (setting) => setting.id === 84
+    );
+
+    const athenaEnabled =
+      athenaSetting?.default && typeof athenaSetting.default === 'object'
+        ? athenaSetting.default.enableEmbeddedApp === 'Yes'
+        : athenaSetting?.default === 'Yes';
+
+    return athenaEnabled ? 'ehr-settings-athena' : 'ehr-settings-amd';
+  }, [moduleSettings]);
+
+  const activeAppointmentAllowlist = useMemo(
+    () => getAppointmentAllowlist(moduleSettings, activeEhrModuleKey),
+    [moduleSettings, activeEhrModuleKey]
+  );
+
   // If blocked, show blocked access screen
   if (isBlocked) {
     return (
@@ -349,25 +556,98 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     return userSettingsOverrides[key];
   };
 
+  const dismissOpsRestoreRequest = (requestId) => {
+    setOpsRestoreRequests((prev) => prev.map((request) => {
+      if (request.requestId !== requestId || request.status !== 'open') return request;
+      return {
+        ...request,
+        status: 'dismissed',
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: currentUserEmail,
+      };
+    }));
+  };
+
+  const applyOpsRestoreRequest = (requestId) => {
+    const request = opsRestoreRequests.find((item) => item.requestId === requestId && item.status === 'open');
+    if (!request || !isMasterUser()) return;
+
+    setModuleSettings((prev) => {
+      const module = prev[request.moduleId];
+      if (!module) return prev;
+
+      return {
+        ...prev,
+        [request.moduleId]: {
+          ...module,
+          settings: module.settings.map((setting) => (
+            setting.id === request.settingId
+              ? { ...setting, opsLockState: 'unlocked' }
+              : setting
+          ))
+        }
+      };
+    });
+
+    setOpsRestoreRequests((prev) => prev.map((item) => {
+      if (item.requestId !== requestId || item.status !== 'open') return item;
+      return {
+        ...item,
+        status: 'resolved',
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: currentUserEmail,
+      };
+    }));
+  };
+
   // Helper function to set user-specific setting
   const setUserSetting = (userId, moduleId, settingId, property, value) => {
-    // PM is read-only while Ops session is active.
-    if (!isMasterUser() && isPMReadOnly) return;
+    // OPS can no longer mutate user overrides.
+    if (isMasterUser()) return;
 
-    // Defense-in-depth: PM can only create/edit overrides when Ops Lock is unlocked for that setting.
-    if (!isMasterUser()) {
-      const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
-      if (setting && setting.opsLockState !== 'unlocked') return;
+    // PM is read-only while Ops session is active.
+    if (isPMReadOnly) return;
+
+    // Defense-in-depth:
+    // - unlocked: PM can manage override value + lock state
+    // - locked-visible: PM can only change override lock state (visible <-> hidden)
+    // - locked-hidden: PM cannot manage overrides
+    const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
+    if (setting && setting.opsLockState === 'locked-hidden') return;
+    if (
+      setting &&
+      setting.opsLockState === 'locked-visible' &&
+      !(property === 'pmLockState' && canPMSetOverrideLockState(setting, value))
+    ) {
+      return;
     }
 
-    const key = `${userId}-${moduleId}-${settingId}`;
-    setUserSettingsOverrides(prev => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        [property]: value
+    setUserSettingsOverrides(prev => {
+      const key = `${userId}-${moduleId}-${settingId}`;
+      const next = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          [property]: value
+        }
+      };
+
+      // Controls 22 is a combined payload:
+      // { sendNote: 'True'|'False', sendTranscript: 'True'|'False' }
+      // Force child false when parent is disabled.
+      if (moduleId === 'controls' && settingId === 22 && property === 'value') {
+        const current = next[key]?.value || {};
+        const incoming = value && typeof value === 'object' ? value : current;
+        const sendNote = incoming.sendNote === 'True' ? 'True' : 'False';
+        const sendTranscript = sendNote === 'True' && incoming.sendTranscript === 'True' ? 'True' : 'False';
+        next[key] = {
+          ...next[key],
+          value: { sendNote, sendTranscript }
+        };
       }
-    }));
+
+      return next;
+    });
   };
 
   // Helper function to get all overrides for a specific setting
@@ -379,13 +659,14 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
       if (key.endsWith(suffix)) {
         const userId = key.slice(0, -suffix.length);
         const override = userSettingsOverrides[key];
-        if (override && override.value !== undefined) {
+        if (override && (override.value !== undefined || override.pmLockState !== undefined)) {
           const user = allUsers.find(u => u.id.toString() === userId);
           if (user) {
             overrides.push({
               userId,
               userName: user.name,
               value: override.value,
+              defaultService: override.defaultService,
               pmLockState: override.pmLockState || 'unlocked'
             });
           }
@@ -397,11 +678,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
   // Helper function to remove user-specific setting override
   const removeUserSetting = (userId, moduleId, settingId) => {
-    if (!isMasterUser() && isPMReadOnly) return;
-    if (!isMasterUser()) {
-      const setting = moduleSettings[moduleId]?.settings.find((s) => s.id === settingId);
-      if (setting && setting.opsLockState !== 'unlocked') return;
-    }
+    // OPS can no longer mutate user overrides.
+    if (isMasterUser()) return;
+    if (isPMReadOnly) return;
+    const setting = moduleSettings[moduleId]?.settings.find((s) => s.id === settingId);
+    if (setting && setting.opsLockState !== 'unlocked') return;
 
     const key = `${userId}-${moduleId}-${settingId}`;
     setUserSettingsOverrides(prev => {
@@ -460,7 +741,9 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   // Helper function to remove multiple overrides
   // Always removes the entire override since we only keep overrides that differ from BOTH defaults
   const removeMultipleOverrides = (overridesToRemove, moduleId, settingId) => {
-    if (!isMasterUser() && isPMReadOnly) return;
+    // OPS can no longer mutate user overrides.
+    if (isMasterUser()) return;
+    if (isPMReadOnly) return;
 
     setUserSettingsOverrides(prev => {
       const updated = { ...prev };
@@ -506,20 +789,31 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     }
 
     // Ops inheritance enforcement (source of truth):
-    // When Ops locks a setting (locked-visible/locked-hidden), PM must not be able to:
-    // - change defaults
-    // - change pmLockState
-    // - change defaultService (service-settings-combined)
+    // - unlocked: PM can edit defaults, lock state, defaultService
+    // - locked-visible: PM can only change pmLockState (locked-visible <-> locked-hidden)
+    // - locked-hidden: PM cannot view/edit
     if (!isMasterUser()) {
       const setting = moduleSettings[moduleId]?.settings.find(s => s.id === settingId);
-      const opsLocked = setting && !canPMEditSetting(setting);
       const parentSetting = setting?.dependency ? getSettingById(setting.dependency) : null;
       const parentOpsLocked = parentSetting && !canPMEditSetting(parentSetting);
       const pmAttemptingRestrictedChange =
         property === 'default' || property === 'pmLockState' || property === 'defaultService';
 
-      if ((opsLocked || parentOpsLocked) && pmAttemptingRestrictedChange) {
+      // Parent lock still blocks dependent setting edits.
+      if (parentOpsLocked && pmAttemptingRestrictedChange) {
         return;
+      }
+
+      if (setting?.opsLockState === 'locked-hidden' && pmAttemptingRestrictedChange) {
+        return;
+      }
+
+      if (setting?.opsLockState === 'locked-visible' && pmAttemptingRestrictedChange) {
+        const isAllowedTighten =
+          property === 'pmLockState' && canPMSetDefaultLockState(setting, value);
+        if (!isAllowedTighten) {
+          return;
+        }
       }
 
       // Dependency enforcement: if the dependency is currently disabled, PM should not be able to change the dependent.
@@ -586,8 +880,10 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
     const dependentSetting = getSettingById(setting.dependency);
 
-    // Handle toggle dependencies (default is 'True' or 'False')
-    if (dependentSetting?.default === 'True') return true;
+    // Handle toggle dependencies (supports multiple option value styles).
+    const depDefault = dependentSetting?.default;
+    if (depDefault === 'True' || depDefault === 'Yes' || depDefault === 'On') return true;
+    if (depDefault === 'False' || depDefault === 'No' || depDefault === 'Off') return false;
 
     // Handle multiselect dependencies (default is an array)
     // For setting 42 depending on 41, it's enabled if 41 has at least one option selected
@@ -609,68 +905,10 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     return setting.options;
   };
 
-  const applySettingProperty = (moduleId, settingId, property, value) => {
-    setModuleSettings((prev) => ({
-      ...prev,
-      [moduleId]: {
-        ...prev[moduleId],
-        settings: prev[moduleId].settings.map((setting) =>
-          setting.id === settingId ? { ...setting, [property]: value } : setting
-        )
-      }
-    }));
-  };
-
-  // Prototype helper: use currently selected module and first setting with overrides for modal demos.
-  const getPrototypeOpsTarget = () => {
-    const settings = moduleSettings[selectedModule]?.settings || [];
-    if (!settings.length) return null;
-
-    const withOverrides = settings.find((s) => getSettingOverrides(selectedModule, s.id).length > 0);
-    const target = withOverrides || settings[0];
-
-    return {
-      moduleId: selectedModule,
-      settingId: target.id,
-      settingName: target.name,
-      overridesToRemove: getSettingOverrides(selectedModule, target.id),
-    };
-  };
-
-  const openPrototypeOpsHideFlow = () => {
-    const target = getPrototypeOpsTarget();
-    if (!target || target.overridesToRemove.length === 0) {
-      setCrossTabToast('No overrides found in this module. Add an override to preview this flow.');
-      return;
-    }
-    setOpsHideOverridesData(target);
-    setShowOpsHideOverridesModal(true);
-  };
-
-  const openPrototypeOpsVisibleFlow = () => {
-    const target = getPrototypeOpsTarget();
-    if (!target || target.overridesToRemove.length === 0) {
-      setCrossTabToast('No overrides found in this module. Add an override to preview this flow.');
-      return;
-    }
-    setOpsLockVisibleOverridesData(target);
-    setShowOpsLockVisibleOverridesModal(true);
-  };
-
   const filteredUsers = allUsers.filter(user =>
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (user.specialty && user.specialty.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (user.role && user.role.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
-  const availableLinkedAssignmentUsers = buildLinkedAssignmentCandidates(
-    allUsers,
-    selectedUser?.id,
-    seededLinkedAssignmentCandidates
-  );
-
-  const selectedLinkedAssignmentUser = availableLinkedAssignmentUsers.find(
-    (u) => String(u.id) === String(selectedNewUser)
   );
 
   const handleSaveLinkedAssignment = () => {
@@ -803,10 +1041,10 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
   // Main Left Navigation Component
   const LeftNavigation = () => (
-    <div className="w-72 bg-gray-50 border-r border-gray-200 h-screen overflow-y-auto">
-      <div className="p-6 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900">Practice Settings</h2>
-        <p className="text-sm text-gray-600 mt-1">Manage settings and users</p>
+    <div className="w-72 bg-white border-r border-gray-200 h-screen overflow-y-auto">
+      <div className="p-5 border-b border-gray-200">
+        <h2 className="text-base font-semibold text-gray-900">Practice Settings</h2>
+        <p className="text-sm text-gray-500 mt-1">Manage settings and users</p>
       </div>
       
       <nav className="p-4">
@@ -814,7 +1052,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           <button
             onClick={() => setCurrentView('settings')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-              currentView === 'settings' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+              currentView === 'settings' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
             }`}
           >
             <Settings className="w-5 h-5" />
@@ -828,7 +1066,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                   key={key}
                   onClick={() => setSelectedModule(key)}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
-                    selectedModule === key ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
+                    selectedModule === key ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -848,7 +1086,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           <button
             onClick={() => setCurrentView('users')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-              currentView === 'users' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+              currentView === 'users' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
             }`}
           >
             <Users className="w-5 h-5" />
@@ -858,7 +1096,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           <button
             onClick={() => setCurrentView('retrieve-consults')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-              currentView === 'retrieve-consults' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+              currentView === 'retrieve-consults' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
             }`}
           >
             <RotateCcw className="w-5 h-5" />
@@ -871,15 +1109,50 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
   // Settings View Component
   const SettingsView = () => (
-    <div className="flex-1 p-8 bg-gray-50 min-h-screen">
+    <div className="flex-1 p-6 bg-gray-50 min-h-screen">
       <div className="max-w-4xl mx-auto">
-        {showCrossTabOverridesBanner && pendingCrossTabOverrides && (
-          <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-400 p-4 rounded">
+        {showCrossTabRestoreRequestsBanner && pendingCrossTabRestoreRequests && (
+          <div className="mb-5 bg-white border border-cyan-200 p-4 rounded-md">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-emerald-900">Override updates available</p>
+                <p className="text-sm font-semibold text-cyan-900">Restore requests updated</p>
+                <p className="text-sm text-cyan-800 mt-1">
+                  Restore requests changed in another tab. Apply now to stay in sync.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setShowCrossTabRestoreRequestsBanner(false);
+                    setPendingCrossTabRestoreRequests(null);
+                  }}
+                  className="px-3 py-2 text-cyan-800 bg-white border border-cyan-200 rounded-md hover:bg-cyan-50 transition-colors text-sm font-medium"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => {
+                    setOpsRestoreRequests(pendingCrossTabRestoreRequests);
+                    setShowCrossTabRestoreRequestsBanner(false);
+                    setPendingCrossTabRestoreRequests(null);
+                    setCrossTabToast('Applied restore request updates from another tab.');
+                  }}
+                  className="px-3 py-2 text-white bg-cyan-700 rounded-md hover:bg-cyan-800 transition-colors text-sm font-medium"
+                >
+                  Apply now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCrossTabOverridesBanner && pendingCrossTabOverrides && (
+          <div className="mb-5 bg-white border border-emerald-200 p-4 rounded-md">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-emerald-900">Overrides updated</p>
                 <p className="text-sm text-emerald-800 mt-1">
-                  User overrides were updated in another tab. Apply updates now to stay in sync.
+                  User overrides changed in another tab. Apply now to stay in sync.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -888,7 +1161,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                     setShowCrossTabOverridesBanner(false);
                     setPendingCrossTabOverrides(null);
                   }}
-                  className="px-3 py-2 text-emerald-800 bg-white border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-colors text-sm font-medium"
+                  className="px-3 py-2 text-emerald-800 bg-white border border-emerald-200 rounded-md hover:bg-emerald-50 transition-colors text-sm font-medium"
                 >
                   Dismiss
                 </button>
@@ -899,9 +1172,9 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                     setPendingCrossTabOverrides(null);
                     setCrossTabToast('Applied override updates from another tab.');
                   }}
-                  className="px-3 py-2 text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
+                  className="px-3 py-2 text-white bg-emerald-700 rounded-md hover:bg-emerald-800 transition-colors text-sm font-medium"
                 >
-                  Apply overrides
+                  Apply now
                 </button>
               </div>
             </div>
@@ -909,12 +1182,12 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         )}
 
         {showCrossTabUpdateBanner && pendingCrossTabModuleSettings && (
-          <div className="mb-6 bg-indigo-50 border-l-4 border-indigo-400 p-4 rounded">
+          <div className="mb-5 bg-white border border-indigo-200 p-4 rounded-md">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-indigo-900">Updates available</p>
+                <p className="text-sm font-semibold text-indigo-900">Settings updated</p>
                 <p className="text-sm text-indigo-800 mt-1">
-                  Settings were updated in another tab. Apply updates now to stay in sync.
+                  Settings changed in another tab. Apply now to stay in sync.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -923,7 +1196,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                     setShowCrossTabUpdateBanner(false);
                     setPendingCrossTabModuleSettings(null);
                   }}
-                  className="px-3 py-2 text-indigo-700 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors text-sm font-medium"
+                  className="px-3 py-2 text-indigo-700 bg-white border border-indigo-200 rounded-md hover:bg-indigo-50 transition-colors text-sm font-medium"
                 >
                   Dismiss
                 </button>
@@ -934,9 +1207,9 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                     setPendingCrossTabModuleSettings(null);
                     setCrossTabToast('Applied updates from another tab.');
                   }}
-                  className="px-3 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+                  className="px-3 py-2 text-white bg-indigo-700 rounded-md hover:bg-indigo-800 transition-colors text-sm font-medium"
                 >
-                  Apply updates
+                  Apply now
                 </button>
               </div>
             </div>
@@ -944,38 +1217,15 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         )}
 
         {crossTabToast && (
-          <div className="mb-6 bg-gray-900 text-white px-4 py-3 rounded-lg shadow">
+          <div className="mb-5 bg-gray-900 text-white px-4 py-3 rounded-md">
             <p className="text-sm">{crossTabToast}</p>
           </div>
         )}
 
-        {isMasterUser() && (
-          <div className="mb-6 bg-violet-50 border border-violet-200 rounded-lg p-4">
-            <p className="text-sm font-semibold text-violet-900">Prototype Flow Triggers (Ops)</p>
-            <p className="text-xs text-violet-800 mt-1">
-              Use these demo actions to preview modals for Ops lock/override cleanup.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                onClick={openPrototypeOpsHideFlow}
-                className="px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
-              >
-                Preview: Ops Lock Hidden
-              </button>
-              <button
-                onClick={openPrototypeOpsVisibleFlow}
-                className="px-3 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
-              >
-                Preview: Ops Lock Visible
-              </button>
-            </div>
-          </div>
-        )}
-
         {!isMasterUser() && isPMReadOnly && (
-          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="mb-5 bg-white border border-amber-200 rounded-md p-4">
             <p className="text-sm text-amber-900 font-medium">
-              Ops is active. Dashboard is currently in read-only mode.
+              Settings are view-only while an Ops session is active.
             </p>
             <p className="text-xs text-amber-800 mt-1">
               {activeOpsUser ? `Active Ops user: ${activeOpsUser}. ` : ''}
@@ -984,14 +1234,54 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           </div>
         )}
 
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-6">
+        {isMasterUser() && openOpsRestoreRequests.length > 0 && (
+          <div className="mb-5 bg-white border border-violet-200 rounded-md p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-violet-900">
+                Pending restore requests ({openOpsRestoreRequests.length})
+              </p>
+            </div>
+            <div className="space-y-3">
+              {openOpsRestoreRequests.map((request) => (
+                <div
+                  key={request.requestId}
+                  className="bg-gray-50 border border-violet-100 rounded-md px-3 py-2 flex items-start justify-between gap-3"
+                >
+                  <div className="text-xs text-violet-900">
+                    <p className="font-semibold">{request.settingName}</p>
+                    <p className="mt-0.5">
+                      Requested by {request.createdByEmail} • Scope: {request.scope}
+                    </p>
+                    {request.reason && <p className="mt-0.5">Reason: {request.reason}</p>}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => applyOpsRestoreRequest(request.requestId)}
+                      className="px-2.5 py-1.5 text-xs rounded-md bg-violet-700 text-white hover:bg-violet-800"
+                    >
+                      Restore access
+                    </button>
+                    <button
+                      onClick={() => dismissOpsRestoreRequest(request.requestId)}
+                      className="px-2.5 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              <h1 className="text-2xl font-semibold text-gray-900 mb-1">
                 {moduleSettings[selectedModule]?.name}
               </h1>
               {moduleSettings[selectedModule]?.subtitle && (
-                <p className="text-gray-600 text-lg">{moduleSettings[selectedModule].subtitle}</p>
+                <p className="text-gray-600">{moduleSettings[selectedModule].subtitle}</p>
               )}
             </div>
           </div>
@@ -1040,16 +1330,16 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
   // Retrieve Deleted Consults View Component
   const RetrieveConsultsView = () => (
-    <div className="flex-1 p-8 bg-gray-50 min-h-screen">
+    <div className="flex-1 p-6 bg-gray-50 min-h-screen">
       <div className="max-w-6xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Retrieve Deleted Consults</h1>
-          <p className="text-gray-600 text-lg">Search and retrieve consults deleted by doctors within the last 6 months</p>
+          <h1 className="text-2xl font-semibold text-gray-900 mb-1">Retrieve Deleted Consults</h1>
+          <p className="text-gray-600">Search and retrieve consults deleted by doctors within the last 6 months</p>
         </div>
 
-        <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
+        <div className="bg-white rounded-lg p-6 border border-gray-200">
           {/* Information Banner */}
-          <div className="mb-6 bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
+          <div className="mb-6 bg-white border border-amber-200 p-4 rounded-md">
             <div className="flex items-start">
               <svg className="w-5 h-5 text-amber-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
@@ -1066,7 +1356,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           <div className="space-y-6">
             {/* Step 1: Doctor Selection */}
             <div className="border-l-4 border-blue-400 bg-blue-50 p-6 rounded-lg">
-              <h4 className="text-lg font-semibold text-blue-800 mb-4">Step 1: Select Doctor</h4>
+              <h4 className="text-base font-semibold text-blue-800 mb-4">Step 1: Select Doctor</h4>
               <p className="text-sm text-blue-700 mb-4">
                 First, select the doctor whose deleted consults you want to search.
               </p>
@@ -1099,7 +1389,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
             {/* Step 2: Filter Options - Only show after doctor selected */}
             {selectedRetrieveDoctor && (
               <div className="border-l-4 border-green-400 bg-green-50 p-6 rounded-lg">
-                <h4 className="text-lg font-semibold text-green-800 mb-4">Step 2: Filter Deleted Consults</h4>
+                <h4 className="text-base font-semibold text-green-800 mb-4">Step 2: Filter Deleted Consults</h4>
                 <p className="text-sm text-green-700 mb-4">
                   Use patient name and/or date range to filter deleted consults.
                 </p>
@@ -1166,6 +1456,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         id: 'CONS-2025-001',
                         consultId: 'CONS-2025-001',
                         patientName: 'John Doe',
+                        appointmentType: 'Follow-up',
                         deletedDate: '2025-10-15',
                         consultDate: '2025-10-10',
                         reason: 'Follow-up consultation',
@@ -1177,6 +1468,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         id: 'CONS-2025-002',
                         consultId: 'CONS-2025-002',
                         patientName: 'Jane Smith',
+                        appointmentType: 'Initial Consultation',
                         deletedDate: '2025-09-20',
                         consultDate: '2025-09-18',
                         reason: 'Initial consultation',
@@ -1188,6 +1480,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         id: 'CONS-2025-003',
                         consultId: 'CONS-2025-003',
                         patientName: 'Robert Johnson',
+                        appointmentType: 'Annual Checkup',
                         deletedDate: '2025-05-01',
                         consultDate: '2025-04-28',
                         reason: 'Annual checkup',
@@ -1199,6 +1492,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         id: 'CONS-2025-004',
                         consultId: 'CONS-2025-004',
                         patientName: 'Emily Davis',
+                        appointmentType: 'Routine Checkup',
                         deletedDate: '2025-10-20',
                         consultDate: '2025-10-15',
                         reason: 'Routine checkup',
@@ -1210,6 +1504,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         id: 'CONS-2025-005',
                         consultId: 'CONS-2025-005',
                         patientName: 'Michael Brown',
+                        appointmentType: 'Physical Examination',
                         deletedDate: '2025-11-01',
                         consultDate: '2025-10-28',
                         reason: 'Physical examination',
@@ -1221,6 +1516,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         id: 'CONS-2025-006',
                         consultId: 'CONS-2025-006',
                         patientName: 'Sarah Johnson',
+                        appointmentType: 'Lab Results Review',
                         deletedDate: '2025-11-05',
                         consultDate: '2025-11-02',
                         reason: 'Consultation for lab results',
@@ -1256,7 +1552,12 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                       return matches;
                     });
 
-                    setDeletedConsults(filtered);
+                    const allowlistFiltered = filterAppointmentsByAllowlist(
+                      filtered,
+                      activeAppointmentAllowlist
+                    );
+
+                    setDeletedConsults(allowlistFiltered);
                     setSelectedConsults([]); // Reset selection when new search is performed
                   }}
                   className="mt-4 px-6 py-3 rounded-lg font-medium transition-colors bg-green-600 text-white hover:bg-green-700"
@@ -1271,7 +1572,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
             {/* Results Section */}
             {deletedConsults.length > 0 && (
-              <div className="border border-gray-200 rounded-lg p-6">
+              <div className="border border-gray-200 rounded-md p-5">
                 <div className="flex items-center justify-between mb-4">
                   <h5 className="font-medium text-gray-900">
                     Deleted Consults ({deletedConsults.length} found)
@@ -1335,6 +1636,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                           <div className="space-y-1 text-sm text-gray-600">
                             <p><span className="font-medium">Consult ID:</span> {consult.consultId}</p>
                             <p><span className="font-medium">Doctor:</span> {consult.doctorName}</p>
+                            <p><span className="font-medium">Appointment Type:</span> {consult.appointmentType}</p>
                             <p><span className="font-medium">Consult Date:</span> {new Date(consult.consultDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
                             <p><span className="font-medium">Deleted On:</span> {new Date(consult.deletedDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
                             <p><span className="font-medium">Reason:</span> {consult.reason}</p>
@@ -1364,7 +1666,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                         setDeletedConsults(prev => prev.filter(c => !selectedConsults.includes(c.id)));
                         setSelectedConsults([]);
                       }}
-                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
+                      className="px-6 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 transition-colors font-medium text-sm"
                     >
                       <div className="flex items-center gap-2">
                         <RotateCcw className="w-4 h-4" />
@@ -1377,7 +1679,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
             )}
 
             {deletedConsults.length === 0 && retrieveStartDate && retrieveEndDate && selectedRetrieveDoctor && (
-              <div className="border border-gray-200 rounded-lg p-8 text-center">
+              <div className="border border-gray-200 rounded-md p-8 text-center">
                 <div className="text-gray-400 mb-3">
                   <Search className="w-12 h-12 mx-auto" />
                 </div>
@@ -1416,13 +1718,13 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
     if (!selectedUser) {
       return (
-        <div className="flex-1 p-8 bg-gray-50 min-h-screen">
+        <div className="flex-1 p-6 bg-gray-50 min-h-screen">
           <div className="max-w-6xl mx-auto">
             <div className="flex items-center justify-between mb-6">
-              <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
+              <h1 className="text-2xl font-semibold text-gray-900">User Management</h1>
               <button
                 onClick={() => setShowAddUserTypeModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors font-medium"
               >
                 + Add User
               </button>
@@ -1446,7 +1748,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                 <div
                   key={user.id}
                   onClick={() => setSelectedUser(user)}
-                  className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-lg cursor-pointer transition-all duration-200 hover:border-blue-300"
+                  className="bg-white border border-gray-200 rounded-lg p-5 cursor-pointer transition-all duration-150 hover:border-gray-300 hover:bg-gray-50"
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -1482,7 +1784,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     return (
       <div className="flex-1 min-h-screen">
         {/* Top Navigation */}
-        <div className="bg-white border-b border-gray-200 px-8 py-6 shadow-sm">
+        <div className="bg-white border-b border-gray-200 px-6 py-5">
           <div className="mb-6">
             <button
               onClick={() => setSelectedUser(null)}
@@ -1491,7 +1793,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
               ← Back to Users
             </button>
             <div>
-              <h3 className="text-xl font-bold text-gray-900">{selectedUser.name}</h3>
+                <h3 className="text-xl font-semibold text-gray-900">{selectedUser.name}</h3>
               <p className="text-sm text-blue-600 font-medium">{selectedUser.specialty} • {selectedUser.email}</p>
             </div>
           </div>
@@ -1546,13 +1848,13 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         </div>
         
         {/* Content Area */}
-        <div className="p-8 bg-gray-50 min-h-screen">
+        <div className="p-6 bg-gray-50 min-h-screen">
           <div className="max-w-6xl mx-auto">
             {selectedUserView === 'permissions' && (
-              <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
+              <div className="bg-white rounded-lg p-6 border border-gray-200">
                 <h3 className="text-xl font-semibold text-gray-900 mb-6">User Permissions</h3>
 
-                <div className="bg-gray-50 rounded-lg p-6 space-y-6">
+                <div className="bg-gray-50 rounded-md p-6 space-y-6">
                   {/* Create Consults */}
                   <div className="flex items-center justify-between">
                     <div>
@@ -1659,7 +1961,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                 </div>
 
                 {/* Linked Doctors Section for Secondary Users */}
-                <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 mt-6">
+                <div className="bg-white rounded-lg p-6 border border-gray-200 mt-6">
                   <h3 className="text-xl font-semibold text-gray-900 mb-6">Linked to Doctors</h3>
 
                   {linkedAccounts
@@ -1694,7 +1996,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
             )}
 
             {selectedUserView === 'manage-access' && (
-              <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
+              <div className="bg-white rounded-lg p-6 border border-gray-200">
                 <h3 className="text-xl font-semibold text-gray-900 mb-6">
                   Manage User Access
                   <span className="ml-3 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Active</span>
@@ -1731,7 +2033,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
             )}
 
             {selectedUserView === 'link-secondary' && (
-              <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
+              <div className="bg-white rounded-lg p-6 border border-gray-200">
                 <h3 className="text-xl font-semibold text-gray-900 mb-6">Linked Assignments</h3>
                 
                 <div className="space-y-6">
@@ -1793,17 +2095,17 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
   // Main Component Return
   return (
     <div className="min-h-screen bg-gray-100">
-      <header className="bg-white border-b border-gray-200 px-8 py-6 shadow-sm">
+      <header className="bg-white border-b border-gray-200 px-6 py-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Shield className="w-6 h-6 text-blue-600" />
+            <div className="p-2 bg-gray-100 rounded-md">
+              <Shield className="w-6 h-6 text-gray-700" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">
+              <h1 className="text-lg font-semibold text-gray-900">
                 {practiceName ? `${practiceName} — Practice Management Dashboard` : 'Practice Management Dashboard'}
               </h1>
-              <p className="text-sm text-gray-600">Configure settings and manage user access</p>
+              <p className="text-sm text-gray-500">Configure settings and manage user access</p>
             </div>
           </div>
 
@@ -1847,7 +2149,12 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         open={showEmailModal}
         onClose={() => setShowEmailModal(false)}
         onAttest={() => {
-          updateSettingState('controls', 22, 'default', 'True');
+          const emailSetting = moduleSettings.controls?.settings.find((s) => s.id === 22);
+          const prior = emailSetting?.default || {};
+          updateSettingState('controls', 22, 'default', {
+            sendNote: 'True',
+            sendTranscript: prior?.sendTranscript === 'True' ? 'True' : 'False'
+          });
           setShowEmailModal(false);
         }}
       />
@@ -2010,62 +2317,14 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         setHipaaAttestationUser={setHipaaAttestationUser}
         setShowHipaaEmailConfirm={setShowHipaaEmailConfirm}
         getSettingOverrides={getSettingOverrides}
+        getUserSetting={getUserSetting}
+        removeUserSetting={removeUserSetting}
         getMatchingOverrideAlertMessage={getMatchingOverrideAlertMessage}
         doesOverrideMatchDefault={doesOverrideMatchDefault}
         setUserSetting={setUserSetting}
         onClose={() => {
           setShowAddOverrideModal(false);
           setCurrentOverrideSetting(null);
-        }}
-      />
-      <OpsHideOverridesModal
-        open={showOpsHideOverridesModal}
-        data={opsHideOverridesData}
-        onCancel={() => {
-          setShowOpsHideOverridesModal(false);
-          setOpsHideOverridesData(null);
-        }}
-        onConfirm={() => {
-          if (opsHideOverridesData) {
-            removeMultipleOverrides(
-              opsHideOverridesData.overridesToRemove,
-              opsHideOverridesData.moduleId,
-              opsHideOverridesData.settingId
-            );
-            applySettingProperty(opsHideOverridesData.moduleId, opsHideOverridesData.settingId, 'opsLockState', 'locked-hidden');
-            setCrossTabToast('Ops Lock set to Locked (Hidden). Overrides removed.');
-          }
-          setShowOpsHideOverridesModal(false);
-          setOpsHideOverridesData(null);
-        }}
-      />
-      <OpsLockVisibleOverridesModal
-        open={showOpsLockVisibleOverridesModal}
-        data={opsLockVisibleOverridesData}
-        onCancel={() => {
-          setShowOpsLockVisibleOverridesModal(false);
-          setOpsLockVisibleOverridesData(null);
-        }}
-        onKeepOverrides={() => {
-          if (opsLockVisibleOverridesData) {
-            applySettingProperty(opsLockVisibleOverridesData.moduleId, opsLockVisibleOverridesData.settingId, 'opsLockState', 'locked-visible');
-            setCrossTabToast('Ops Lock set to Locked (Visible). Overrides kept.');
-          }
-          setShowOpsLockVisibleOverridesModal(false);
-          setOpsLockVisibleOverridesData(null);
-        }}
-        onRemoveAndLock={() => {
-          if (opsLockVisibleOverridesData) {
-            removeMultipleOverrides(
-              opsLockVisibleOverridesData.overridesToRemove,
-              opsLockVisibleOverridesData.moduleId,
-              opsLockVisibleOverridesData.settingId
-            );
-            applySettingProperty(opsLockVisibleOverridesData.moduleId, opsLockVisibleOverridesData.settingId, 'opsLockState', 'locked-visible');
-            setCrossTabToast('Ops Lock set to Locked (Visible). Overrides removed.');
-          }
-          setShowOpsLockVisibleOverridesModal(false);
-          setOpsLockVisibleOverridesData(null);
         }}
       />
     </div>

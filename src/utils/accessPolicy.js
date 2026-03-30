@@ -25,3 +25,29 @@ export function canPMEditSetting(setting) {
   return setting?.opsLockState === 'unlocked';
 }
 
+/**
+ * PM lock-state permissions under Ops lock.
+ */
+export function canPMSetDefaultLockState(setting, nextLockState) {
+  if (!setting || !nextLockState) return false;
+
+  if (setting.opsLockState === 'unlocked') return true;
+  if (setting.opsLockState === 'locked-visible') {
+    return nextLockState === 'locked-visible' || nextLockState === 'locked-hidden';
+  }
+  return false;
+}
+
+/**
+ * PM override lock-state permissions under Ops lock.
+ */
+export function canPMSetOverrideLockState(setting, nextLockState) {
+  if (!setting || !nextLockState) return false;
+
+  if (setting.opsLockState === 'unlocked') return true;
+  if (setting.opsLockState === 'locked-visible') {
+    return nextLockState === 'locked-visible' || nextLockState === 'locked-hidden';
+  }
+  return false;
+}
+

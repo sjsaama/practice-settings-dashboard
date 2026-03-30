@@ -70,7 +70,7 @@ export default function AuthFlow({ onAuthenticated }) {
     } else {
       // PM must be auto-bound to a practice; fail on login (not after MFA).
       if (!pmPracticeBinding[normalized]) {
-        return setLoginError('No practice assigned to this PM. Please contact an administrator.');
+        return setLoginError('This account is not linked to a practice. Contact your admin for access.');
       }
     }
 
@@ -112,7 +112,7 @@ export default function AuthFlow({ onAuthenticated }) {
 
     // PM: auto-bound to a single practice
     if (!boundPracticeForPm) {
-      setCodeError('No practice assigned to this PM. Please contact an administrator.');
+      setCodeError('This account is not linked to a practice. Contact your admin for access.');
       return;
     }
     completeAuth({ practice: boundPracticeForPm });
@@ -134,10 +134,10 @@ export default function AuthFlow({ onAuthenticated }) {
     <Building2 className="w-7 h-7 text-emerald-600" />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+      <div className="w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-lg p-7">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-11 h-11 rounded-xl bg-slate-50 flex items-center justify-center">
+          <div className="w-11 h-11 rounded-lg bg-slate-50 flex items-center justify-center">
             {icon}
           </div>
           <div className="min-w-0">
@@ -153,11 +153,11 @@ export default function AuthFlow({ onAuthenticated }) {
 
         {step === 'login' && (
           <form onSubmit={handleLoginSubmit} className="space-y-4">
-            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+            <div className="flex rounded-md border border-slate-200 bg-slate-50 p-1">
               <button
                 type="button"
                 onClick={() => setSelectedRole('pm')}
-                className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${
+                className={`flex-1 px-3 py-2 rounded text-sm font-semibold transition-colors ${
                   selectedRole === 'pm'
                     ? 'bg-white text-slate-900 shadow-sm'
                     : 'text-slate-600 hover:text-slate-800'
@@ -168,7 +168,7 @@ export default function AuthFlow({ onAuthenticated }) {
               <button
                 type="button"
                 onClick={() => setSelectedRole('ops')}
-                className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${
+                className={`flex-1 px-3 py-2 rounded text-sm font-semibold transition-colors ${
                   selectedRole === 'ops'
                     ? 'bg-white text-slate-900 shadow-sm'
                     : 'text-slate-600 hover:text-slate-800'
@@ -185,7 +185,7 @@ export default function AuthFlow({ onAuthenticated }) {
                 onChange={(e) => setEmail(e.target.value)}
                 type="email"
                 autoComplete="email"
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="name@company.com"
               />
             </div>
@@ -196,33 +196,50 @@ export default function AuthFlow({ onAuthenticated }) {
                 onChange={(e) => setPassword(e.target.value)}
                 type="password"
                 autoComplete="current-password"
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="••••••••"
               />
             </div>
 
             {loginError && (
-              <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
                 {loginError}
               </div>
             )}
 
             <button
               type="submit"
-              className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              className="w-full px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors font-medium"
             >
               Continue
             </button>
 
+            <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 space-y-1">
+              <p className="font-semibold text-slate-700">Test credentials</p>
+              <p>
+                <span className="font-medium">Password:</span>{' '}
+                <span className="font-mono">marvix</span>
+              </p>
+              <p>
+                <span className="font-medium">PM emails:</span>{' '}
+                <span className="font-mono">a@sunrise.hp</span>,{' '}
+                <span className="font-mono">a@manipal.hp</span>
+              </p>
+              <p>
+                <span className="font-medium">Ops email:</span>{' '}
+                <span className="font-mono">ops@marvix.ai</span>
+              </p>
+            </div>
+
             <p className="text-xs text-slate-500">
-              Demo: choose PM or Ops above. After Continue, a 6-digit code is “sent”. (We display it on the next screen.)
+              Test mode: choose PM or Ops above. After Continue, a 6-digit code is generated and shown on the next screen.
             </p>
           </form>
         )}
 
         {step === 'mfa' && (
           <form onSubmit={handleVerifyCode} className="space-y-4">
-            <div className="text-sm text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+            <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
               We sent a 6-digit code to your email.
               <div className="mt-1 text-xs text-slate-500">
                 Demo code: <span className="font-mono text-slate-700">{sentCode || '------'}</span>
@@ -236,20 +253,20 @@ export default function AuthFlow({ onAuthenticated }) {
                 onChange={(e) => setCode(e.target.value)}
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono tracking-widest"
+                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono tracking-widest"
                 placeholder="123456"
               />
             </div>
 
             {codeError && (
-              <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">
                 {codeError}
               </div>
             )}
 
             <button
               type="submit"
-              className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+              className="w-full px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors font-medium"
             >
               Verify
             </button>
@@ -257,7 +274,7 @@ export default function AuthFlow({ onAuthenticated }) {
             <button
               type="button"
               onClick={handleResendCode}
-              className="w-full px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+              className="w-full px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors font-medium"
             >
               Resend code
             </button>
@@ -266,7 +283,7 @@ export default function AuthFlow({ onAuthenticated }) {
 
         {step === 'selectPractice' && (
           <form onSubmit={handleSelectPracticeContinue} className="space-y-4">
-            <div className="text-sm text-slate-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+            <div className="text-sm text-slate-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
               You’re signed in as Ops. Select the practice you want to manage.
             </div>
 
@@ -275,7 +292,7 @@ export default function AuthFlow({ onAuthenticated }) {
               <select
                 value={selectedPracticeId}
                 onChange={(e) => setSelectedPracticeId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="">Select…</option>
                 {availablePracticesForOps.map((p) => (
@@ -292,7 +309,7 @@ export default function AuthFlow({ onAuthenticated }) {
             <button
               type="submit"
               disabled={!selectedPracticeId}
-              className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Continue
             </button>

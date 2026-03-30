@@ -14,6 +14,7 @@ The prototype is a React SPA with a gated auth flow and a single dashboard surfa
 - Main dashboard surface: `src/PracticeSettingsDashboard.jsx`
 - Access policy helpers: `src/utils/accessPolicy.js`
 - Session helpers: `src/utils/authSession.js`, `src/utils/masterUserSession.js`
+- Appointment allowlist helpers: `src/utils/appointmentAllowlist.js`
 - Practice-scoped persistence:
   - `src/utils/moduleSettingsStorage.js`
   - `src/utils/userSettingsOverridesStorage.js`
@@ -85,7 +86,6 @@ Each setting record uses current dual-lock fields:
   opsLockState: 'unlocked' | 'locked-visible' | 'locked-hidden',
   pmLockState: 'unlocked' | 'locked-visible' | 'locked-hidden',
   defaultService?: string,   // service-settings-combined only
-  dependency?: number,       // optional setting id dependency
   subtext?: string,
   subtexts?: Record<string, string>
 }
@@ -126,6 +126,36 @@ Canonical fields in new records:
 }
 ```
 
+### 3.4 Appointment Allowlist
+
+EHR modules now include an `Appointment Allowlist` multiselect setting:
+
+- AMD: `ehr-settings-amd` setting `id: 78`
+- Athena: `ehr-settings-athena` setting `id: 89`
+
+Behavior:
+
+- Value is stored in each setting's `default` as `string[]`.
+- Empty array (`[]`) is treated as unrestricted (show all appointment types).
+- Filtering is performed via `src/utils/appointmentAllowlist.js` so all appointment views share one rule.
+
+### 3.5 Athena Embedded Combined Setting
+
+Athena embedded behavior is represented as a single combined setting (`id: 84`, type `athena-embedded-combined`) with object value:
+
+```javascript
+{
+  enableEmbeddedApp: 'Yes' | 'No',
+  autoPullInEmbeddedApp: 'Yes' | 'No'
+}
+```
+
+UI modes are presented as:
+
+- `Enable` -> `{ enableEmbeddedApp: 'Yes', autoPullInEmbeddedApp: 'No' }`
+- `Enable + Pull` -> `{ enableEmbeddedApp: 'Yes', autoPullInEmbeddedApp: 'Yes' }`
+- `Disable` -> `{ enableEmbeddedApp: 'No', autoPullInEmbeddedApp: 'No' }`
+
 ---
 
 ## 4. Access Control Rules in Code
@@ -140,12 +170,17 @@ Canonical fields in new records:
 `PracticeSettingsDashboard` additionally blocks PM edits when:
 
 - PM is in read-only mode due to active Ops session
-- Setting dependency is not enabled
-- Parent/dependency setting is effectively Ops-locked
+- (Legacy) dependency gating would block edits when a dependency is disabled; with current normalization, the seeded dependency rows are merged/removed so this does not apply to active settings
 
 ### 4.2 PM -> Doctor
 
 `pmLockState` is applied at default and override levels. Override lock is independent from default lock.
+
+### 4.3 Override Mutation Ownership
+
+- PM is the only role that can create/update/delete user overrides.
+- Ops can review override summaries in UI, but override actions are disabled.
+- Ops remains responsible for setting defaults and `opsLockState`.
 
 ---
 
@@ -158,12 +193,22 @@ Core behavior in `PracticeSettingsDashboard`:
 - On default changes (`default` or `pmLockState`), detect redundant overrides
 - Show confirmation modal before removing redundant overrides
 - Remove only matching redundant entries
+- Array defaults/overrides (including multiselect allowlists) use sorted equality via `valuesAreEqual` to avoid false mismatches from selection order
+- Field guardrails for email settings (`email-delivery-combined`):
+  - block `sendTranscript` override if effective `sendNote` is disabled for that user
+  - auto-remove `sendTranscript` override when `sendNote` override is set to disabled
+  - UI uses a single override entry from the `email-delivery-combined` setting to capture both fields together
 
 For `service-settings-combined`, redundancy check includes:
 
 - `value` (enabled services)
 - `pmLockState`
 - `defaultService`
+
+One-time rollout migration in `src/utils/userSettingsOverridesStorage.js`:
+
+- First load after deployment clears stored override payload for each practice scope.
+- Migration is tracked with a versioned localStorage marker and runs once per practice.
 
 ---
 
@@ -215,7 +260,7 @@ The following cleanup work has been completed:
 ### 9.2 Remaining Technical Debt
 
 1. `PracticeSettingsDashboard.jsx` still orchestrates most state transitions and cross-feature business logic.
-2. Lock-state editing controls are not fully surfaced in the extracted `SettingRow` UI (current row emphasizes value controls and override flows).
+2. Lock-state controls are partially surfaced in `SettingRow` (`pmLockState` is editable inline); `opsLockState` handling still relies on dashboard-level orchestration and modal flows.
 3. Behavior-heavy logic would benefit from custom hooks/services:
    - `useOverrideRules`
    - `useSettingsPersistence`

@@ -102,7 +102,7 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-8 max-w-lg w-full mx-4 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Override Default Setting</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Confirm custom setting</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -120,17 +120,17 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
 
           <div className="bg-orange-50 border-l-4 border-orange-400 p-4 rounded mb-4">
             <p className="text-sm text-orange-800 font-medium mb-2">
-              You are about to change the default setting for this user.
+              You are about to set a custom value for this user.
             </p>
             <p className="text-sm text-orange-700 leading-relaxed">
-              This will override the practice-wide default setting. The user will have a custom configuration different from other users.
+              This user will no longer inherit the practice default for this setting.
             </p>
           </div>
 
           <div className="bg-gray-50 p-4 rounded-lg space-y-2">
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {pendingSettingChange.isLockStateChange ? 'Practice Lock State:' : 'Practice Default:'}
+                {pendingSettingChange.isLockStateChange ? 'Practice access state:' : 'Practice default:'}
               </span>
               <span className="text-sm text-gray-900 font-medium">
                 {formatChangeValue(pendingSettingChange.defaultValue, pendingSettingChange.isLockStateChange)}
@@ -138,7 +138,7 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {pendingSettingChange.isLockStateChange ? 'New Lock State:' : 'New User Value:'}
+                {pendingSettingChange.isLockStateChange ? 'New access state:' : 'New user value:'}
               </span>
               <span className="text-sm text-blue-700 font-medium">
                 {formatChangeValue(pendingSettingChange.newValue, pendingSettingChange.isLockStateChange)}
@@ -157,7 +157,7 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
             onClick={onConfirm}
             className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
           >
-            Confirm Override
+            Save custom setting
           </button>
         </div>
       </div>
@@ -172,7 +172,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Override Cleanup Required</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Remove redundant custom settings</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -185,7 +185,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
             </div>
             <div className="flex-1">
               <p className="font-medium text-gray-900 mb-1">
-                {data.isLockStateChange ? 'Lock State Change Detected' : 'Default Value Change Detected'}
+                {data.isLockStateChange ? 'Access state changed' : 'Default value changed'}
               </p>
               <p className="text-sm text-gray-600">Setting: {data.settingName}</p>
             </div>
@@ -193,21 +193,21 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
 
           <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded mb-4">
             <p className="text-sm text-amber-800 font-medium mb-2">
-              Some user overrides now match BOTH default value and lock state
+              Some custom settings now match both the default value and access state
             </p>
             <p className="text-sm text-amber-700 leading-relaxed">
-              After this change, the following users will have overrides where BOTH the value and lock state match the practice-wide defaults.
-              These redundant overrides will be automatically removed, and these users will inherit the practice-wide settings.
+              After this change, the users below will have custom settings identical to the practice default.
+              These redundant custom settings will be removed, and those users will inherit the default.
             </p>
             <p className="text-sm text-amber-700 leading-relaxed mt-2">
-              <strong>Note:</strong> An override only exists when it differs from the default. Since both properties now match, the override is no longer needed.
+              <strong>Note:</strong> A custom setting is only needed when it differs from default values.
             </p>
           </div>
 
           <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-2">
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {data.isLockStateChange ? 'Current Lock State:' : 'Current Default:'}
+                {data.isLockStateChange ? 'Current access state:' : 'Current default:'}
               </span>
               <span className="text-sm text-gray-900 font-medium">
                 {formatChangeValue(data.oldDefault, data.isLockStateChange)}
@@ -215,7 +215,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {data.isLockStateChange ? 'New Lock State:' : 'New Default:'}
+                {data.isLockStateChange ? 'New access state:' : 'New default:'}
               </span>
               <span className="text-sm text-blue-700 font-medium">
                 {formatChangeValue(data.newDefault, data.isLockStateChange)}
@@ -226,7 +226,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
           {data.redundantOverrides.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <p className="text-sm font-semibold text-red-900 mb-3">
-                Overrides to be removed ({data.redundantOverrides.length} user{data.redundantOverrides.length !== 1 ? 's' : ''}):
+                Settings to remove ({data.redundantOverrides.length} user{data.redundantOverrides.length !== 1 ? 's' : ''}):
               </p>
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {data.redundantOverrides.map((override, index) => (
@@ -264,7 +264,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
             onClick={onConfirm}
             className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
           >
-            Confirm & Remove Overrides
+            Remove redundant settings
           </button>
         </div>
       </div>

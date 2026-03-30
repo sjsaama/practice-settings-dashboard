@@ -1,6 +1,6 @@
 # Product Requirements Document: Simplified Practice Settings Dashboard
 
-**Version:** 1.2
+**Version:** 1.3
 **Last Updated:** March 23, 2026
 **Status:** Active Development
 **Branch:** `simplified-master-user`
@@ -42,7 +42,7 @@ For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see
 - ✅ **opsLockState** (controls what PM can see/edit)
 
 **User Overrides (Doctor-level):**
-- ✅ Can create/edit doctor overrides **only when** `opsLockState: 'unlocked'`
+- ❌ Cannot create/edit/remove doctor overrides (read-only override visibility only)
 
 **Purpose:**
 - Set organization-wide defaults
@@ -72,7 +72,7 @@ For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see
 - ✅ User-specific overrides
 
 **Restrictions:**
-- Cannot edit settings where `opsLockState: 'locked-visible'`
+- Cannot edit default values where `opsLockState: 'locked-visible'` (PM may only set lock state to `locked-visible` or `locked-hidden`)
 - Cannot see settings where `opsLockState: 'locked-hidden'`
 
 **Purpose:**
@@ -92,11 +92,11 @@ Every setting has two lock controls:
 
 ### 3.2 opsLockState (Ops Controls PM Access)
 
-| Value | PM Can See | PM Can Edit | PM Can Create Overrides | Use Case |
-|-------|-----------|-------------|------------------------|----------|
-| **unlocked** 👁️ | ✅ Yes | ✅ Yes | ✅ Yes | Practice-customizable (timezone, pronouns) |
-| **locked-visible** 🔒 | ✅ Yes | ❌ No | ❌ No | Organization standards, compliance |
-| **locked-hidden** 👁️‍🗨️ | ❌ No | ❌ N/A | ❌ N/A | Sensitive configs, billing, technical |
+| Value | PM Can See | PM Can Edit Default | PM Can Change Lock State | PM Can Create Overrides | Use Case |
+|-------|-----------|---------------------|--------------------------|------------------------|----------|
+| **unlocked** 👁️ | ✅ Yes | ✅ Yes | ✅ Yes (all) | ✅ Yes | Practice-customizable (timezone, pronouns) |
+| **locked-visible** 🔒 | ✅ Yes | ❌ No | ✅ Yes (`locked-visible` / `locked-hidden` only) | ❌ No (value overrides) | Organization standards, compliance |
+| **locked-hidden** 👁️‍🗨️ | ❌ No | ❌ No | ❌ No | ❌ No | Sensitive configs, billing, technical |
 
 **Set By:** Master User (Ops)
 **Affects:** PM access to settings
@@ -123,7 +123,7 @@ Ops (opsLockState) → PM (pmLockState) → Doctors
 ```
 
 **Rules:**
-1. If `opsLockState: 'locked-visible'` → PM cannot change default or pmLockState
+1. If `opsLockState: 'locked-visible'` → PM cannot change default, but can only tighten lock state (`locked-visible` or `locked-hidden`)
 2. If `opsLockState: 'locked-hidden'` → PM cannot see setting at all
 3. If `opsLockState: 'unlocked'` → PM can set pmLockState for doctors
 4. PM can only control pmLockState for settings where opsLockState is unlocked
@@ -142,7 +142,7 @@ Ops (opsLockState) → PM (pmLockState) → Doctors
 
 **Behavior:**
 - User turns setting on/off with one action.
-- If a dependent setting relies on this toggle, that dependent setting is disabled when prerequisite conditions are not met.
+- Related controls are disabled when prerequisite toggle conditions are not met.
 - Lock-state rules still apply (Ops/PM may see or edit based on lock configuration).
 
 ---
@@ -185,27 +185,7 @@ Ops (opsLockState) → PM (pmLockState) → Doctors
 ---
 
 ### 4.3 Ordering & Sequence Types
-
-#### **Order List** (Drag & Drop)
-- **Examples:**
-  - Section Order (determines note structure order)
-
-**Behavior:**
-- User controls output order by reordering items.
-- New order applies as the default for users without overrides.
-- Reordering is only available when there is more than one item.
-
----
-
-#### **Range Selector** (Time Range Dropdown)
-- **Examples:**
-  - Auto Delete Old Consults (1-90 days)
-  - Appointment Sync Range (1-30 days)
-
-**Behavior:**
-- User chooses a bounded range (for retention/sync windows).
-- Range choice determines operational behavior for that module.
-- Product may surface warnings for high-impact ranges.
+This section is kept for reference, but `order-list` (drag & drop) and `range-selector` types are not present in the current seeded configuration.
 
 ---
 
@@ -309,9 +289,10 @@ If Ops changes default to Central:
 - Delete overrides (user reverts to default immediately)
 
 **Master User (Ops) Current Prototype Behavior:**
-- Can access the same override modal flow as PM for settings with `opsLockState: 'unlocked'`
-- Can create and remove overrides for those unlocked settings
-- Cannot add overrides when `opsLockState` is not `unlocked`
+- Cannot create, edit, or remove user overrides
+- Can view override summaries in read-only mode for audit/review
+- Can only manage setting defaults and `opsLockState`
+- Rollout migration clears existing stored overrides once per practice
 
 ---
 
@@ -365,7 +346,7 @@ If Ops changes default to Central:
   - Can Generate Notes
   - Edit Generated Notes
   - Push to EHR
-- Permission dependency rules:
+- Permission gating rules:
   - `Edit Generated Notes` requires `Can Generate Notes`.
   - `Push to EHR` requires both `Can Generate Notes` and `Edit Generated Notes`.
 - New secondary accounts are available immediately for linking to doctors.
@@ -407,8 +388,7 @@ If Ops changes default to Central:
         pmLockState: 'unlocked',
         subtext: 'optional description',
         subtexts: { option1: 'description1', ... }, // optional
-        required: false, // optional
-        dependsOn: { settingId: 5, value: 'True' } // optional
+        required: false // optional
       }
     ]
   }
@@ -420,15 +400,13 @@ If Ops changes default to Central:
 ### 6.1 Note Settings
 **Purpose:** Settings that affect notes and documents
 
-**Settings (8):**
+**Settings (6):**
 1. Default Patient Pronoun (dropdown)
 2. Patient Name (dropdown)
 3. Default Visit Type (dropdown)
 4. Default Note View (dropdown)
 5. Capture Dictation Separately (toggle)
-6. Always Use Default Visit Type (toggle) - *depends on #3*
-7. Sections to Include (multiselect)
-8. Available Service Types (service-settings-combined)
+6. Skip empty sections in Note (toggle)
 
 **Override Support:** ✅ Yes
 
@@ -437,18 +415,12 @@ If Ops changes default to Central:
 ### 6.2 Controls
 **Purpose:** General practice settings
 
-**Settings (11):**
-1. Auto Create Consults (toggle)
-2. Auto Delete Old Consults (range-selector)
-3. Section Order (order-list)
-4. Auto Sync Times (time-multiselect)
-5. Automatically Send Note (toggle)
-6. Automatically Send Note Only if Edited (toggle) - *depends on #5*
-7. Automatically Send Only Finalized Note (toggle) - *depends on #5*
-8. Timezone (dropdown)
-9. Require Secondary Account Link (toggle)
-10. Custom Delete Days (range-selector)
-11. Inactivity Timeout (dropdown)
+**Settings (5):**
+1. Timezone (dropdown)
+2. 2-factor Authentication (toggle)
+3. Email Delivery Mode (`email-delivery-combined`) - send note + send transcript together
+4. Play Recording Consent Disclaimer (toggle)
+5. Delete Consults (dropdown)
 
 **Override Support:** ✅ Yes
 
@@ -457,10 +429,9 @@ If Ops changes default to Central:
 ### 6.3 E/M Settings
 **Purpose:** Evaluation & Management code settings
 
-**Settings (3):**
-1. Auto-Generate E/M Codes (toggle)
-2. Include Preventive Medicine (toggle)
-3. Preferred Code Set (dropdown)
+**Settings (2):**
+1. Service Settings (service-settings-combined)
+2. Enable Preventive Medicine Service (toggle)
 
 **Override Support:** ✅ Yes
 
@@ -470,10 +441,10 @@ If Ops changes default to Central:
 **Purpose:** AMD EHR integration settings
 
 **Settings (4):**
-1. Sync Appointments (toggle)
-2. Appointment Sync Range (range-selector)
-3. Appointment Types (order-list)
-4. Auto Sync Times (time-multiselect)
+1. Daily appointment sync time (time-multiselect)
+2. Allow repeat note push (toggle)
+3. Push to EHR automatically (toggle)
+4. Appointment Allowlist (keyword-list) - *empty selection means show all appointment types*
 
 **Override Support:** ✅ Yes
 
@@ -482,10 +453,12 @@ If Ops changes default to Central:
 ### 6.5 EHR Settings - Athena
 **Purpose:** Athena EHR integration settings
 
-**Settings (3):**
-1. Enable Athena Sync (toggle)
-2. Sync Frequency (dropdown)
-3. Department Filter (multiselect)
+**Settings (5):**
+1. Athena Embedded Mode (`athena-embedded-combined`: Enable / Enable + Pull / Disable)
+2. Daily appointment sync time (time-multiselect)
+3. Allow repeat note push (toggle)
+4. Push to EHR automatically (toggle)
+5. Appointment Allowlist (keyword-list) - *empty selection means show all appointment types*
 
 **Override Support:** ✅ Yes
 
@@ -495,8 +468,8 @@ If Ops changes default to Central:
 **Purpose:** Google Calendar & Zoom integration
 
 **Settings (2):**
-1. Google Calendar Sign-in (google-signin)
-2. Zoom App (zoom-check)
+1. Google Calendar (google-signin)
+2. Zoom (zoom-check)
 
 **Override Support:** ❌ No (User-only settings)
 **Note:** Shows "User Only" badge in module list
@@ -569,19 +542,17 @@ The app starts with a dedicated authentication flow before the dashboard renders
 - Setting label and contextual help text
 - Ops lock-state badge display (read-only indicator for current `opsLockState`)
 - Default value control
-- User override management (PM and Ops, where permitted)
-
-**Current prototype note:**
-- The extracted row component currently surfaces default-value controls and override management.
-- Full inline lock dropdown controls are not currently rendered in the row in this prototype pass.
+- User override management (PM only)
 
 **Input Control:** Varies by setting type (see Section 4)
 
 **User Overrides Section:**
-- Visible for PM and Ops when setting `opsLockState` is `unlocked`
+- Visible for PM when setting `opsLockState` is `unlocked` or `locked-visible`
+- Visible for Ops as read-only summary
 - Shows list of users with custom values
-- "+ Add Override" button
-- Each override shows: user name, value, and remove action
+- "+ Add Override" button (PM only; under `locked-visible` PM can only adjust override visibility / lock state)
+- Each override shows: user name, value, and remove action (remove action only when `opsLockState` is `unlocked`)
+- For Controls `email-delivery-combined` (Email Delivery Mode), a single override entry point configures both `sendNote` and `sendTranscript` together.
 
 ---
 
@@ -593,10 +564,12 @@ The app starts with a dedicated authentication flow before the dashboard renders
 3. Select user (dropdown)
 4. Custom value (input matching setting type)
 5. Lock state (dropdown for pmLockState)
+6. For Email Delivery Mode (`email-delivery-combined`), the modal also configures `sendNote` and `sendTranscript` together in the same flow.
 
 **Validation:**
 - Cannot create override if BOTH value AND pmLockState match default
 - Shows alert if trying to create redundant override
+- For Email Delivery Mode, save is rejected only when both `sendNote` and `sendTranscript` (with lock state) match their defaults.
 
 ---
 
@@ -615,7 +588,7 @@ The app starts with a dedicated authentication flow before the dashboard renders
 
 ---
 
-### 7.6 User Management Actions (Prototype)
+### 7.6 User Management Actions
 
 **Manage Access Actions:**
 - Suspend Account
@@ -633,7 +606,7 @@ The app starts with a dedicated authentication flow before the dashboard renders
 ### 8.1 Lock State Rules
 
 1. **opsLockState Override:**
-   - If `locked-visible`: PM sees but cannot edit
+   - If `locked-visible`: PM sees, but defaults are read-only; PM may only adjust lock state (`pmLockState`) / override visibility
    - If `locked-hidden`: PM doesn't see at all
    - If `unlocked`: PM has full control
 
@@ -643,8 +616,9 @@ The app starts with a dedicated authentication flow before the dashboard renders
    - PM can set different pmLockStates for different users
 
 3. **Cascading Locks:**
-   - Ops locks → PM cannot change pmLockState
-   - Ops locks → PM cannot create overrides
+   - `opsLockState: locked-visible` → PM cannot edit defaults or create value overrides; PM may only tighten `pmLockState` / override visibility
+   - `opsLockState: locked-hidden` → PM cannot see or change `pmLockState`
+   - `opsLockState: unlocked` → PM can manage overrides (value + `pmLockState`)
    - PM locks (on override) → Doctor sees as locked
 
 ---
@@ -668,27 +642,7 @@ The app starts with a dedicated authentication flow before the dashboard renders
 
 ---
 
-### 8.3 Dependency Rules
-
-**Dependent Settings:**
-- Disabled when parent setting = False
-- Grayed out in UI
-- Cannot be edited until parent = True
-
-**Ops→PM propagation for dependent settings:**
-- If a parent setting is `opsLockState: locked-hidden`, PM should not see the dependent setting either (avoid “orphan” settings).
-- If a parent setting is `opsLockState: locked-visible`, PM can see the dependent but cannot edit it (even if the dependent itself is unlocked), because its meaning depends on the parent’s state.
-- Dependency enforcement applies to practice defaults: if the parent is not enabled, PM cannot change the dependent default.
-- When a dependent setting is disabled by dependency, its lock dropdown is also disabled (to avoid “looks editable but won’t apply” confusion).
-
-**Examples:**
-- "Always Use Default Visit Type" depends on "Default Visit Type"
-- "Auto Send Only if Edited" depends on "Auto Send"
-- "Auto Send Finalized Only" depends on "Auto Send"
-
----
-
-### 8.4 Service Settings Rules
+### 8.3 Service Settings Rules
 
 1. **Minimum Enabled:** Must keep at least 1 service enabled
 2. **Default Service Validation:** Must be in enabled services list
@@ -728,21 +682,21 @@ PM User
     │      └─> All non-override users see new default
     │      └─> Checks for redundant overrides
     │
-    ├─> Edit pmLockState (if opsLockState: unlocked)
+    ├─> Edit pmLockState (if opsLockState: unlocked; or tighten lock state if opsLockState: locked-visible)
     │      └─> Updates setting.pmLockState
     │      └─> Doctors see new lock state
     │      └─> Checks for redundant overrides
     │
-    └─> Manage User Overrides (if opsLockState: unlocked)
-           ├─> Create Override
+    └─> Manage User Overrides (if opsLockState: unlocked; or restrict visibility if opsLockState: locked-visible)
+           ├─> Create Override (unlocked only)
            │      └─> Validates not redundant
            │      └─> Stores override with pmLockState
            │
-           ├─> Edit Override
+           ├─> Edit Override (value unlock-only; locked-visible only adjusts pmLockState)
            │      └─> Updates override value or pmLockState
            │      └─> Independent of default
            │
-           └─> Delete Override
+           └─> Delete Override (unlocked only)
                   └─> Removes override
                   └─> User reverts to default immediately
 ```
@@ -766,9 +720,9 @@ PM User
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
-| **User override references a service no longer enabled** | Product flags impacted users and requires confirmation before reconciliation. |
-| **User attempts to disable all services** | Product blocks the action and requires at least one enabled service. |
-| **Default service is no longer valid** | Product requires/chooses a valid enabled default before save completes. |
+| **User override for service settings has no enabled services** | Save is blocked with validation (`Please select at least one enabled service`). |
+| **User sets a default service that is not enabled** | Save is blocked with validation (`Default service must be one of the enabled services`). |
+| **Default service is missing while service override is visible** | Save is blocked with validation (`Please select a default service`). |
 
 ---
 
@@ -786,18 +740,9 @@ PM User
 
 | Scenario | Impact |
 |----------|--------|
-| **opsLockState: unlocked → locked-visible** | PM loses edit access immediately, sees disabled controls. If overrides exist, Ops is prompted to keep them (they reappear on unlock) or remove them now. |
-| **opsLockState: unlocked → locked-hidden** | Setting disappears from PM view, and existing doctor overrides for that setting are removed after confirmation |
-| **opsLockState: locked → unlocked** | PM regains full access, can create overrides again |
-
----
-
-### 10.5 Dependent Settings Interactions
-
-| Scenario | Expected Behavior |
-|----------|-------------------|
-| **Parent setting is locked/hidden by Ops** | Dependent settings follow the same effective PM access constraints to avoid inconsistent UX. |
-| **Parent change makes dependent default invalid** | Product requires a valid dependent default and communicates the adjustment. |
+| **Setting is `opsLockState: locked-visible`** | PM can see the setting but cannot edit default/defaultService values. PM can only tighten lock state (`locked-visible` or `locked-hidden`) and can only apply lock restrictions on overrides. |
+| **Setting is `opsLockState: locked-hidden`** | PM cannot see or manage the setting/overrides. |
+| **Setting is `opsLockState: unlocked`** | PM can edit defaults and manage overrides (value + lock state). |
 
 ## 11. Performance Considerations
 
@@ -808,20 +753,7 @@ Performance expectations are tracked as product constraints:
 
 ---
 
-## 12. Future Enhancements
 
-### Planned Features
-- Bulk lock state operations
-- Undo/redo for setting changes
-- Scheduled changes (apply at specific time)
-- Active user warnings (show how many users affected)
-- Conflict resolution for concurrent edits
-- Override inheritance rules for copied users
-- Audit log for all Ops and PM actions
-- Setting search and filter
-- Export/import settings configuration
-
----
 
 ## 13. Technical Implementation
 
@@ -846,7 +778,6 @@ This PRD captures product behavior and acceptance-level requirements only.
 - **Override**: User-specific setting value that takes precedence over default
 - **Redundant Override**: Override where both value and pmLockState match default
 - **Cascading Lock**: When upper-level lock (ops) prevents lower-level control (PM)
-- **Dependent Setting**: Setting that is disabled when parent setting = False
 - **Service Settings**: Complex setting type with enabled services + default service
 - **Linked Assignment**: Relationship linking an assignee (primary/secondary) to a doctor with an assignment type (`assistant` or `coverage`)
 
@@ -883,3 +814,4 @@ This PRD captures product behavior and acceptance-level requirements only.
 - Updated linked-account sections to linked-assignment model (primary/secondary assignees; assistant/coverage types).
 - Added post-login runtime access gating behavior for Ops-active sessions.
 - Added explicit User Management action flow and prototype persistence scope notes.
+- Updated module inventories and setting names to match current seeded configuration in `src/data/settingsData.js`.

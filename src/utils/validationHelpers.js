@@ -12,6 +12,16 @@
  * @returns {boolean} - True if values are equal
  */
 export const valuesAreEqual = (value1, value2) => {
+  if (value1 && value2 && typeof value1 === 'object' && typeof value2 === 'object' && !Array.isArray(value1) && !Array.isArray(value2)) {
+    const normalizeObject = (obj) => {
+      const entries = Object.entries(obj)
+        .map(([key, value]) => [key, (value && typeof value === 'object' && !Array.isArray(value)) ? normalizeObject(value) : value])
+        .sort(([a], [b]) => a.localeCompare(b));
+      return Object.fromEntries(entries);
+    };
+    return JSON.stringify(normalizeObject(value1)) === JSON.stringify(normalizeObject(value2));
+  }
+
   if (Array.isArray(value1) && Array.isArray(value2)) {
     return JSON.stringify([...value1].sort()) === JSON.stringify([...value2].sort());
   }
@@ -41,6 +51,9 @@ export const formatValueDisplay = (value) => {
   if (Array.isArray(value)) {
     return value.join(', ');
   }
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
   return String(value);
 };
 
@@ -55,7 +68,7 @@ export const getMatchingOverrideAlertMessage = (value, lockState) => {
 
 This setting would have:
 • Value: ${formatValueDisplay(value)}
-• Lock State: ${formatLockStateDisplay(lockState)}
+• Access state: ${formatLockStateDisplay(lockState)}
 
 Which is the same as the practice-wide default. An override must differ from the default.`;
 };
