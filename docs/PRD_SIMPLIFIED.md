@@ -789,29 +789,3 @@ This PRD captures product behavior and acceptance-level requirements only.
 
 ---
 
-## Changelog
-
-### Version 1.0 (December 1, 2025)
-- Initial PRD for simplified master user system
-- Documented two-level lock state system
-- Categorized all 8 setting types
-- Defined override behavior and redundancy detection
-- Documented all 6 settings modules (29 total settings)
-- Added edge cases and business rules
-- Technical implementation details
-
-### Version 1.1 (March 23, 2026)
-- Updated auth model to match implemented login + MFA + practice selection flow.
-- Replaced email-based role inference with session-based role resolution.
-- Documented practice-scoped storage keys for settings, overrides, and linked assignments.
-
-### Version 1.2 (March 23, 2026)
-- Streamlined PRD language to focus on product behavior and acceptance-level requirements.
-- Kept Setting Types, Data Flow, and Edge Cases as concise product sections.
-- Moved implementation-heavy detail to `docs/TECHNICAL_DOCUMENTATION.md`.
-
-### Version 1.3 (March 23, 2026)
-- Updated linked-account sections to linked-assignment model (primary/secondary assignees; assistant/coverage types).
-- Added post-login runtime access gating behavior for Ops-active sessions.
-- Added explicit User Management action flow and prototype persistence scope notes.
-- Updated module inventories and setting names to match current seeded configuration in `src/data/settingsData.js`.
