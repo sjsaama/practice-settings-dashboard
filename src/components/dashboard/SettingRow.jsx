@@ -1,6 +1,16 @@
 import React from 'react';
-import { canPMEditSetting, canPMSeeSetting, getOpsLockLabel } from '../../utils/accessPolicy';
+import { canPMEditSetting, canPMSeeSetting } from '../../utils/accessPolicy';
 import { getTimeOptionsForTimezone } from '../../utils/timeOptions';
+import {
+  DELETE_CONSULTS_SETTING_ID,
+  EHR_PULL_LOOK_AHEAD_SETTING_ID,
+  MAX_WINDOW_DAYS,
+  buildDayOptions,
+  clampRangeSelectorValue,
+  formatDayLabel,
+  getCacheWindowBounds,
+  normalizeCacheWindowValue,
+} from '../../utils/syncWindowRules';
 
 export default function SettingRow({
   setting,
@@ -29,6 +39,7 @@ export default function SettingRow({
   setIsGoogleSignedIn,
   setShowGoogleSignoutModal,
   onRequestAttestation,
+  moduleCapabilities,
 }) {
   const isEnabled = isSettingEnabled(setting);
   const availableOptions = getAvailableOptions(setting);
@@ -63,12 +74,12 @@ export default function SettingRow({
   const getLockStateLabel = (lockState) => {
     switch (lockState) {
       case 'locked-visible':
-        return 'Locked Visible';
+        return 'Shown, not editable';
       case 'locked-hidden':
-        return 'Locked Hidden';
+        return 'Hidden';
       case 'unlocked':
       default:
-        return 'Unlocked';
+        return 'Shown, editable';
     }
   };
 
@@ -255,7 +266,110 @@ export default function SettingRow({
           </div>
         );
       }
-      case 'range-selector':
+      case 'range-selector': {
+        const baseOptions = setting.dependency === 41 ? availableOptions : setting.options;
+        const options = Array.isArray(baseOptions) && baseOptions.length > 0
+          ? baseOptions
+          : buildDayOptions(MAX_WINDOW_DAYS);
+        const safeValue = clampRangeSelectorValue(value, options, setting.default);
+        const currentIndex = Math.max(0, options.indexOf(safeValue));
+        const selectedValue = options[currentIndex] || safeValue;
+
+        return (
+          <div className="space-y-2">
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, options.length - 1)}
+              step={1}
+              value={currentIndex}
+              disabled={isDefaultReadOnly || options.length === 0}
+              onChange={(e) => {
+                const index = Number(e.target.value);
+                const nextValue = options[index];
+                if (nextValue !== undefined) {
+                  handleChange(nextValue);
+                }
+              }}
+              className="w-full accent-indigo-600"
+            />
+            <p className="text-lg font-semibold text-indigo-700">{selectedValue}</p>
+          </div>
+        );
+      }
+      case 'cache-window-combined': {
+        const controlsSettings = moduleSettings.controls?.settings || [];
+        const deleteConsultsSetting = controlsSettings.find((s) => s.id === DELETE_CONSULTS_SETTING_ID);
+        const ehrLookAheadSetting = controlsSettings.find((s) => s.id === EHR_PULL_LOOK_AHEAD_SETTING_ID);
+        const effectiveDeleteConsultsValue = (isUser && targetUserId
+          ? getUserSetting(targetUserId, 'controls', DELETE_CONSULTS_SETTING_ID)?.value
+          : undefined) || deleteConsultsSetting?.default;
+        const effectiveEhrLookAheadValue = (isUser && targetUserId
+          ? getUserSetting(targetUserId, 'controls', EHR_PULL_LOOK_AHEAD_SETTING_ID)?.value
+          : undefined) || ehrLookAheadSetting?.default;
+        const bounds = getCacheWindowBounds({
+          deleteConsultsValue: effectiveDeleteConsultsValue,
+          ehrLookAheadValue: effectiveEhrLookAheadValue,
+          maxDays: MAX_WINDOW_DAYS
+        });
+        const normalizedValue = normalizeCacheWindowValue(value, bounds);
+        const aheadOptions = buildDayOptions(bounds.maxAheadDays);
+        const backOptions = buildDayOptions(bounds.maxBackDays);
+        const aheadIndex = Math.max(0, aheadOptions.indexOf(normalizedValue.aheadDays));
+        const backIndex = Math.max(0, backOptions.indexOf(normalizedValue.backDays));
+
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 block">Local cache look ahead</label>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, aheadOptions.length - 1)}
+                step={1}
+                value={aheadIndex}
+                disabled={isDefaultReadOnly || aheadOptions.length === 0}
+                onChange={(e) => {
+                  const nextAheadValue = aheadOptions[Number(e.target.value)];
+                  if (!nextAheadValue) return;
+                  handleChange({
+                    ...normalizedValue,
+                    aheadDays: nextAheadValue
+                  });
+                }}
+                className="w-full accent-indigo-600"
+              />
+              <p className="text-lg font-semibold text-indigo-700">{normalizedValue.aheadDays}</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 block">Local cache look back</label>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, backOptions.length - 1)}
+                step={1}
+                value={backIndex}
+                disabled={isDefaultReadOnly || backOptions.length === 0}
+                onChange={(e) => {
+                  const nextBackValue = backOptions[Number(e.target.value)];
+                  if (!nextBackValue) return;
+                  handleChange({
+                    ...normalizedValue,
+                    backDays: nextBackValue
+                  });
+                }}
+                className="w-full accent-indigo-600"
+              />
+              <p className="text-lg font-semibold text-indigo-700">{normalizedValue.backDays}</p>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              EHR limits: ahead up to {formatDayLabel(bounds.maxAheadDays)}, back up to {formatDayLabel(bounds.maxBackDays)}.
+            </p>
+          </div>
+        );
+      }
       case 'dropdown': {
         const options = setting.dependency === 41 ? availableOptions : setting.options;
         return (
@@ -467,11 +581,19 @@ export default function SettingRow({
                 <p className="text-xs text-gray-500">No entries. Add words/phrases above.</p>
               )}
             </div>
-
-            <p className="text-[11px] text-gray-500">
-              Tip: you can paste multiple values separated by commas, semicolons, or new lines.
-            </p>
           </div>
+        );
+      }
+      case 'text': {
+        return (
+          <input
+            type="text"
+            value={typeof value === 'string' ? value : ''}
+            onChange={(e) => handleChange(e.target.value)}
+            disabled={isDefaultReadOnly}
+            placeholder="Enter value"
+            className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
+          />
         );
       }
       case 'service-settings-combined': {
@@ -564,6 +686,48 @@ export default function SettingRow({
     }
     return [setting.pmLockState || 'unlocked'];
   })();
+  const currentPmLockState = setting.pmLockState || 'unlocked';
+  const isNonPropagatableSetting = setting.nonPropagatable === true;
+  const supportsUserOverrides = moduleCapabilities?.supportsUserOverrides === true;
+  const usesVisibilityEditabilityUI =
+    !showUserOverride &&
+    !isNonPropagatableSetting;
+  const allowedLockStates = new Set(lockStateOptions);
+  const settingVisibility = currentPmLockState === 'locked-hidden' ? 'hidden' : 'shown';
+  const settingEditability = currentPmLockState === 'unlocked' ? 'editable' : 'not-editable';
+  const canShowEditable = allowedLockStates.has('unlocked');
+  const canShowNotEditable = allowedLockStates.has('locked-visible');
+  const canHideSetting = allowedLockStates.has('locked-hidden');
+
+  const getShownLockState = () => {
+    if (settingEditability === 'editable' && canShowEditable) return 'unlocked';
+    if (canShowNotEditable) return 'locked-visible';
+    if (canShowEditable) return 'unlocked';
+    return currentPmLockState;
+  };
+
+  const handleSettingVisibilityChange = (nextVisibility) => {
+    if (isDefaultLockStateReadOnly) return;
+    if (nextVisibility === 'hidden') {
+      if (!canHideSetting) return;
+      updateSettingState(moduleId, setting.id, 'pmLockState', 'locked-hidden');
+      return;
+    }
+    if (nextVisibility === 'shown') {
+      updateSettingState(moduleId, setting.id, 'pmLockState', getShownLockState());
+    }
+  };
+
+  const handleSettingEditabilityChange = (nextEditability) => {
+    if (isDefaultLockStateReadOnly) return;
+    if (nextEditability === 'editable') {
+      if (!canShowEditable) return;
+      updateSettingState(moduleId, setting.id, 'pmLockState', 'unlocked');
+      return;
+    }
+    if (!canShowNotEditable) return;
+    updateSettingState(moduleId, setting.id, 'pmLockState', 'locked-visible');
+  };
   const formatOverrideValue = (overrideValue) => {
     if (setting.type === 'email-delivery-combined' && overrideValue && typeof overrideValue === 'object') {
       const sendNote = overrideValue.sendNote === 'True' ? 'True' : 'False';
@@ -578,8 +742,34 @@ export default function SettingRow({
     if (setting.type === 'service-settings-combined' && Array.isArray(overrideValue)) {
       return overrideValue.join(', ');
     }
+    if (setting.type === 'cache-window-combined' && overrideValue && typeof overrideValue === 'object') {
+      const normalized = normalizeCacheWindowValue(overrideValue, {
+        maxAheadDays: MAX_WINDOW_DAYS,
+        maxBackDays: MAX_WINDOW_DAYS
+      });
+      return `Ahead: ${normalized.aheadDays}; Back: ${normalized.backDays}`;
+    }
     return Array.isArray(overrideValue) ? overrideValue.join(', ') : String(overrideValue);
   };
+  const getOpsRestrictionCopy = (lockState) => {
+    if (lockState === 'locked-visible') return 'Not editable';
+    if (lockState === 'locked-hidden') return 'Hidden';
+    return 'Editable';
+  };
+  const renderInfoTooltip = (text) => (
+    <div className="relative group inline-flex items-center ml-2">
+      <button
+        type="button"
+        className="w-4 h-4 rounded-full border border-gray-400 text-[10px] text-gray-600 flex items-center justify-center bg-white cursor-help"
+        aria-label={text}
+      >
+        i
+      </button>
+      <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 w-64 px-3 py-2 rounded-md bg-gray-900 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-lg">
+        {text}
+      </div>
+    </div>
+  );
 
   return (
     <div className={`bg-white rounded-lg border border-gray-200 p-6 mb-5 ${!isEnabled ? 'opacity-60' : ''}`}>
@@ -588,65 +778,118 @@ export default function SettingRow({
           <div className="flex items-center gap-3 mb-2">
             <h3 className="text-lg font-semibold text-gray-900">{setting.name}</h3>
             {setting.required && <span className="text-red-500 text-sm font-medium">*</span>}
-            {isPMDefaultView && (
+            {isPMDefaultView && !usesVisibilityEditabilityUI && (
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                Ops: {getOpsLockLabel(setting.opsLockState)}
+                {getOpsRestrictionCopy(setting.opsLockState)}
               </span>
             )}
           </div>
+          {getDisplaySubtext() && (
+            <p className="text-sm text-gray-600 leading-relaxed">{getDisplaySubtext()}</p>
+          )}
         </div>
-        {!showUserOverride && (
-          <div className="min-w-52 ml-4">
-            <label className="block text-xs font-medium text-gray-600 mb-1 text-right">Lock state</label>
-            <select
-              value={setting.pmLockState || 'unlocked'}
-              onChange={(e) => updateSettingState(moduleId, setting.id, 'pmLockState', e.target.value)}
-              disabled={isDefaultLockStateReadOnly}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
-            >
-              {lockStateOptions.map((lock) => (
-                <option key={lock} value={lock}>
-                  {lock === 'unlocked' ? 'Unlocked' : lock === 'locked-visible' ? 'Locked Visible' : 'Locked Hidden'}
-                </option>
-              ))}
-            </select>
-            {!isMasterUser() && setting.opsLockState === 'locked-visible' && (
-              <p className="text-[11px] text-amber-700 mt-1 text-right">
-                Ops Lock active: only Locked Visible or Locked Hidden are allowed.
-              </p>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-start gap-4">
+          <label className="text-sm font-medium text-gray-700 min-w-16 mt-2">
+            {showUserOverride ? 'User Value:' : 'Default:'}
+          </label>
+          <div className="flex-1">{showUserOverride ? renderFormControl(true, userId) : renderFormControl()}</div>
+        </div>
+        {usesVisibilityEditabilityUI && !showUserOverride && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-4">
+              <label className="text-sm font-medium text-gray-700 min-w-16 mt-2 inline-flex items-center">
+                Visibility:
+                {renderInfoTooltip('Decides if this setting will be visible to users')}
+              </label>
+              <div className="flex-1">
+                  <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+                    {(canShowEditable || canShowNotEditable || settingVisibility === 'shown') && (
+                      <button
+                        type="button"
+                        onClick={() => handleSettingVisibilityChange('shown')}
+                        disabled={isDefaultLockStateReadOnly}
+                        className={`px-4 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          settingVisibility === 'shown' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        Show
+                      </button>
+                    )}
+                    {(canHideSetting || settingVisibility === 'hidden') && (
+                      <button
+                        type="button"
+                        onClick={() => handleSettingVisibilityChange('hidden')}
+                        disabled={isDefaultLockStateReadOnly}
+                        className={`px-4 py-2 text-sm border-l border-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          settingVisibility === 'hidden' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        Hide
+                      </button>
+                    )}
+                  </div>
+              </div>
+            </div>
+
+            {settingVisibility === 'shown' && canShowEditable && canShowNotEditable && (
+              <div className="flex items-start gap-4">
+                <label className="text-sm font-medium text-gray-700 min-w-16 mt-2 inline-flex items-center">
+                  Editability:
+                  {renderInfoTooltip('Decides if users can edit the value of this setting')}
+                </label>
+                <div className="flex-1">
+                  <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+                    {(canShowEditable || settingEditability === 'editable') && (
+                      <button
+                        type="button"
+                        onClick={() => handleSettingEditabilityChange('editable')}
+                        disabled={isDefaultLockStateReadOnly}
+                        className={`px-4 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          settingEditability === 'editable' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        Editable
+                      </button>
+                    )}
+                    {(canShowNotEditable || settingEditability === 'not-editable') && (
+                      <button
+                        type="button"
+                        onClick={() => handleSettingEditabilityChange('not-editable')}
+                        disabled={isDefaultLockStateReadOnly}
+                        className={`px-4 py-2 text-sm border-l border-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          settingEditability === 'not-editable' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        Not editable
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
       </div>
 
-      <div className="space-y-4">
-        <div className="flex items-start gap-4">
-          <label className="text-sm font-medium text-gray-700 min-w-16 mt-2">{showUserOverride ? 'User Value:' : 'Default:'}</label>
-          <div className="flex-1">{showUserOverride ? renderFormControl(true, userId) : renderFormControl()}</div>
-        </div>
-      </div>
-
-      {getDisplaySubtext() && (
-        <div className="mt-5 p-3 bg-gray-50 border border-gray-200 rounded-md">
-          <p className="text-sm text-gray-700 leading-relaxed">{getDisplaySubtext()}</p>
-        </div>
-      )}
-
       {!showUserOverride &&
+        !isNonPropagatableSetting &&
         (isMasterUser() || setting.opsLockState !== 'locked-hidden') &&
-        (moduleId === 'note-settings' || moduleId === 'controls' || moduleId === 'ehr-settings-amd' || moduleId === 'ehr-settings-athena' || moduleId === 'em-settings') && (
+        supportsUserOverrides && (
         <div className="mt-5 pt-5 border-t border-gray-200">
           <div className="flex items-start justify-between gap-3 mb-4">
             <div className="min-w-0">
-              <h4 className="text-sm font-semibold text-gray-900">User Overrides</h4>
+              <h4 className="text-sm font-semibold text-gray-900">User-specific access & values</h4>
               <p className="text-xs text-gray-500 mt-1">
                 {isMasterUser()
-                  ? 'Visible for OPS review only. Override changes are managed by PM.'
+                  ? 'Read-only view. Practice managers handle user-specific updates.'
                   : setting.opsLockState === 'locked-hidden'
-                    ? 'Hidden by Ops. PM cannot manage overrides.'
+                    ? 'Edit not allowed. This setting is hidden and cannot be changed here.'
                     : setting.opsLockState === 'locked-visible'
-                      ? 'Overrides are visible, but only lock restrictions are allowed.'
-                      : 'Set user-specific values for this setting.'}
+                      ? 'Edit not allowed for defaults. You can only choose "Shown, not editable" or Hidden per user.'
+                      : 'Set a user-specific value and access level for this setting.'}
               </p>
             </div>
             {(canManageOverrides || canRestrictOverridesOnly) && (
@@ -666,7 +909,7 @@ export default function SettingRow({
                 }}
                 className="shrink-0 px-3 py-1.5 bg-gray-900 text-white text-xs rounded-md hover:bg-gray-800 transition-colors font-medium"
               >
-                Manage overrides
+                Customize users
               </button>
             )}
           </div>
@@ -682,11 +925,11 @@ export default function SettingRow({
                       </div>
                       {override.value !== undefined ? (
                         <p className="text-xs text-gray-600">
-                          Override value: <span className="font-semibold text-blue-700">{formatOverrideValue(override.value)}</span>
+                          User value: <span className="font-semibold text-blue-700">{formatOverrideValue(override.value)}</span>
                         </p>
                       ) : (
                         <p className="text-xs text-gray-600">
-                          Override value: <span className="font-semibold text-blue-700">Inherit default</span>
+                          User value: <span className="font-semibold text-blue-700">Use practice value</span>
                         </p>
                       )}
                       {setting.type === 'service-settings-combined' && override.defaultService && (
@@ -695,14 +938,14 @@ export default function SettingRow({
                         </p>
                       )}
                       <p className="text-xs text-gray-600 mt-0.5">
-                        Lock state: <span className="font-semibold text-amber-700">{getLockStateLabel(override.pmLockState)}</span>
+                        User access: <span className="font-semibold text-amber-700">{getLockStateLabel(override.pmLockState)}</span>
                       </p>
                     </div>
                     <div className="ml-3 flex flex-col gap-1">
                       {canRestrictOverridesOnly && override.pmLockState !== 'locked-hidden' && (
                         <button
                           onClick={() => {
-                            if (window.confirm(`Set ${override.userName} override to Locked Hidden?`)) {
+                            if (window.confirm(`Hide this setting for ${override.userName}?`)) {
                               setUserSetting(override.userId, moduleId, setting.id, 'pmLockState', 'locked-hidden');
                             }
                           }}
@@ -714,7 +957,7 @@ export default function SettingRow({
                       {canManageOverrides && (
                         <button
                           onClick={() => {
-                            if (window.confirm(`Remove override for ${override.userName}?`)) {
+                            if (window.confirm(`Remove user-specific setting for ${override.userName}?`)) {
                               removeUserSetting(override.userId, moduleId, setting.id);
                             }
                           }}
@@ -729,7 +972,7 @@ export default function SettingRow({
               </div>
             ) : (
               <div className="text-center py-4 px-3 bg-gray-50 rounded-md border border-dashed border-gray-300">
-                <p className="text-sm text-gray-500">No custom settings yet.</p>
+                <p className="text-sm text-gray-500">No user-specific settings yet.</p>
               </div>
             );
           })()}

@@ -126,20 +126,34 @@ Canonical fields in new records:
 }
 ```
 
-### 3.4 Appointment Allowlist
+### 3.4 EHR Appointment Pull Filters
 
-EHR modules now include an `Appointment Allowlist` multiselect setting:
+Each EHR module now carries both pull-filter settings:
 
-- AMD: `ehr-settings-amd` setting `id: 78`
-- Athena: `ehr-settings-athena` setting `id: 89`
+- `Appointment Type Allowlist`
+- `Appointment Type Blocklist`
 
 Behavior:
 
-- Value is stored in each setting's `default` as `string[]`.
-- Empty array (`[]`) is treated as unrestricted (show all appointment types).
-- Filtering is performed via `src/utils/appointmentAllowlist.js` so all appointment views share one rule.
+- Both values are stored in each setting's `default` as `string[]`.
+- `Appointment Type Allowlist`: appointment types that will be pulled from EHR.
+- `Appointment Type Blocklist`: appointment types that will not be pulled from EHR.
+- If an appointment type exists in both lists, blocklist takes precedence.
+- Empty allowlist means unrestricted unless blocked.
+- Existing allowlist filtering is centralized in `src/utils/appointmentAllowlist.js`.
 
-### 3.5 Athena Embedded Combined Setting
+### 3.5 EHR Sync and Push Controls
+
+Each EHR module includes:
+
+- `Daily appointment sync time` (`time-multiselect`)
+- `Push to EHR automatically` (`toggle`)
+
+Push behavior:
+
+- When `Push to EHR automatically` is enabled, note is pushed to EHR immediately after processing.
+
+### 3.6 Athena Embedded Combined Setting
 
 Athena embedded behavior is represented as a single combined setting (`id: 84`, type `athena-embedded-combined`) with object value:
 
@@ -156,9 +170,46 @@ UI modes are presented as:
 - `Enable + Pull` -> `{ enableEmbeddedApp: 'Yes', autoPullInEmbeddedApp: 'Yes' }`
 - `Disable` -> `{ enableEmbeddedApp: 'No', autoPullInEmbeddedApp: 'No' }`
 
+### 3.7 EHR Pull vs Local Cache Windows (Controls)
+
+Controls now separate EHR pull scope from local cache scope:
+
+- EHR pull window:
+  - Look ahead is a dedicated `range-selector` setting (`id: 26`).
+  - Look back is derived from `Delete Consults` (`id: 25`).
+- Local cache window:
+  - Single combined setting (`id: 27`, type `cache-window-combined`) with object value:
+
+```javascript
+{
+  aheadDays: '8 days',
+  backDays: '7 days'
+}
+```
+
+Constraint rules:
+
+- `local.aheadDays <= ehrPullLookAheadDays`
+- `local.backDays <= deleteConsultsDerivedLookBackDays`
+
+Enforcement:
+
+- Bounds are enforced in default controls and override controls.
+- On changes to either EHR bound (`Delete Consults` or EHR pull look-ahead), local cache defaults/overrides are normalized to remain valid.
+
 ---
 
 ## 4. Access Control Rules in Code
+
+Capability-driven UI gating:
+- `src/data/settingsData.js` exports `getModuleCapabilities(moduleId)`.
+- Capabilities currently define:
+  - `supportsUserOverrides`
+  - `usesVisibilityEditabilityUI`
+- `note-settings` and all `ehr-settings-*` modules now set both flags to `true`, which drives:
+  - split `Visibility` + `Editability` controls in `SettingRow`
+  - split override access controls in `AddOverrideModal`
+  - user override section visibility without hardcoded EHR module allowlists
 
 ### 4.1 Ops -> PM
 
@@ -198,6 +249,10 @@ Core behavior in `PracticeSettingsDashboard`:
   - block `sendTranscript` override if effective `sendNote` is disabled for that user
   - auto-remove `sendTranscript` override when `sendNote` override is set to disabled
   - UI uses a single override entry from the `email-delivery-combined` setting to capture both fields together
+
+Canonical combination matrix and PM-facing lock-state cases are documented in:
+
+- `docs/ACCESS_INHERITANCE_RULES.md` → "Override/default case matrix (PM perspective)"
 
 For `service-settings-combined`, redundancy check includes:
 

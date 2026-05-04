@@ -2,8 +2,31 @@ import React from 'react';
 import { Settings, Users, X } from 'lucide-react';
 import { formatLockStateDisplay, formatValueDisplay } from '../../utils/validationHelpers';
 
-function formatChangeValue(value, isLockStateChange) {
-  if (isLockStateChange) return formatLockStateDisplay(value);
+function formatPronounAccessState(lockState) {
+  if (lockState === 'unlocked') return 'Shown, editable';
+  if (lockState === 'locked-visible') return 'Shown, not editable';
+  if (lockState === 'locked-hidden') return 'Hidden';
+  return formatLockStateDisplay(lockState);
+}
+
+function usesSimplifiedAccessCopy(settingName) {
+  return [
+    'Patient Pronoun in Generated Notes',
+    'Patient Name',
+    'Default Visit Type',
+    'Default Note View',
+    'Capture Dictation Separately',
+    'Skip empty sections in Note',
+  ].includes(settingName);
+}
+
+function formatChangeValue(value, isLockStateChange, settingName) {
+  if (isLockStateChange) {
+    if (usesSimplifiedAccessCopy(settingName)) {
+      return formatPronounAccessState(value);
+    }
+    return formatLockStateDisplay(value);
+  }
   return formatValueDisplay(value);
 }
 
@@ -102,7 +125,7 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-8 max-w-lg w-full mx-4 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Confirm custom setting</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Confirm user-specific setting</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -120,28 +143,36 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
 
           <div className="bg-orange-50 border-l-4 border-orange-400 p-4 rounded mb-4">
             <p className="text-sm text-orange-800 font-medium mb-2">
-              You are about to set a custom value for this user.
+              You are about to set a user-specific value for this user.
             </p>
             <p className="text-sm text-orange-700 leading-relaxed">
-              This user will no longer inherit the practice default for this setting.
+              This user will no longer inherit the practice value for this setting.
             </p>
           </div>
 
           <div className="bg-gray-50 p-4 rounded-lg space-y-2">
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {pendingSettingChange.isLockStateChange ? 'Practice access state:' : 'Practice default:'}
+                {pendingSettingChange.isLockStateChange ? 'Practice access:' : 'Practice value:'}
               </span>
               <span className="text-sm text-gray-900 font-medium">
-                {formatChangeValue(pendingSettingChange.defaultValue, pendingSettingChange.isLockStateChange)}
+                {formatChangeValue(
+                  pendingSettingChange.defaultValue,
+                  pendingSettingChange.isLockStateChange,
+                  pendingSettingChange.settingName
+                )}
               </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {pendingSettingChange.isLockStateChange ? 'New access state:' : 'New user value:'}
+                {pendingSettingChange.isLockStateChange ? 'New user access:' : 'New user value:'}
               </span>
               <span className="text-sm text-blue-700 font-medium">
-                {formatChangeValue(pendingSettingChange.newValue, pendingSettingChange.isLockStateChange)}
+                {formatChangeValue(
+                  pendingSettingChange.newValue,
+                  pendingSettingChange.isLockStateChange,
+                  pendingSettingChange.settingName
+                )}
               </span>
             </div>
           </div>
@@ -157,7 +188,7 @@ export function OverrideConfirmModal({ open, pendingSettingChange, selectedUser,
             onClick={onConfirm}
             className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
           >
-            Save custom setting
+            Save user setting
           </button>
         </div>
       </div>
@@ -172,7 +203,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Remove redundant custom settings</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Remove redundant user-specific settings</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -185,7 +216,7 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
             </div>
             <div className="flex-1">
               <p className="font-medium text-gray-900 mb-1">
-                {data.isLockStateChange ? 'Access state changed' : 'Default value changed'}
+                {data.isLockStateChange ? 'User access changed' : 'Practice value changed'}
               </p>
               <p className="text-sm text-gray-600">Setting: {data.settingName}</p>
             </div>
@@ -193,32 +224,32 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
 
           <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded mb-4">
             <p className="text-sm text-amber-800 font-medium mb-2">
-              Some custom settings now match both the default value and access state
+              Some user-specific settings now match both the practice value and user access
             </p>
             <p className="text-sm text-amber-700 leading-relaxed">
-              After this change, the users below will have custom settings identical to the practice default.
-              These redundant custom settings will be removed, and those users will inherit the default.
+              After this change, the users below will have values identical to the practice value.
+              These redundant user-specific settings will be removed, and those users will inherit the practice value.
             </p>
             <p className="text-sm text-amber-700 leading-relaxed mt-2">
-              <strong>Note:</strong> A custom setting is only needed when it differs from default values.
+              <strong>Note:</strong> A user-specific setting is only needed when it differs from the practice value.
             </p>
           </div>
 
           <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-2">
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {data.isLockStateChange ? 'Current access state:' : 'Current default:'}
+                {data.isLockStateChange ? 'Current user access:' : 'Current practice value:'}
               </span>
               <span className="text-sm text-gray-900 font-medium">
-                {formatChangeValue(data.oldDefault, data.isLockStateChange)}
+                {formatChangeValue(data.oldDefault, data.isLockStateChange, data.settingName)}
               </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">
-                {data.isLockStateChange ? 'New access state:' : 'New default:'}
+                {data.isLockStateChange ? 'New user access:' : 'New practice value:'}
               </span>
               <span className="text-sm text-blue-700 font-medium">
-                {formatChangeValue(data.newDefault, data.isLockStateChange)}
+                {formatChangeValue(data.newDefault, data.isLockStateChange, data.settingName)}
               </span>
             </div>
           </div>
@@ -240,7 +271,13 @@ export function OverrideCleanupModal({ open, data, onCancel, onConfirm }) {
                         <p className="text-xs text-gray-600">
                           Value: {Array.isArray(override.value) ? override.value.join(', ') : override.value}
                         </p>
-                        <p className="text-xs text-gray-600">Lock: {formatLockStateDisplay(override.pmLockState)}</p>
+                        {usesSimplifiedAccessCopy(data.settingName) ? (
+                          <p className="text-xs text-gray-600">
+                            Access: {formatPronounAccessState(override.pmLockState)}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-gray-600">Lock: {formatLockStateDisplay(override.pmLockState)}</p>
+                        )}
                       </div>
                     </div>
                     <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">
@@ -279,7 +316,7 @@ export function OpsHideOverridesModal({ open, data, onCancel, onConfirm }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Confirm: Hide Setting (Overrides Will Be Removed)</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Confirm: Hide setting (user-specific settings will be removed)</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -288,10 +325,10 @@ export function OpsHideOverridesModal({ open, data, onCancel, onConfirm }) {
         <div className="mb-6">
           <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded mb-4">
             <p className="text-sm text-red-900 font-semibold mb-2">
-              You are setting Ops Lock to <span className="font-bold">Locked (Hidden)</span>.
+              You are setting this to <span className="font-bold">Hidden</span>.
             </p>
             <p className="text-sm text-red-800 leading-relaxed">
-              This will permanently remove existing doctor overrides for this setting so there are no hidden, still-effective overrides.
+              This will permanently remove existing user-specific settings for this item so there are no hidden, still-effective values.
             </p>
           </div>
 
@@ -354,7 +391,7 @@ export function OpsLockVisibleOverridesModal({ open, data, onCancel, onKeepOverr
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Ops Lock: Locked (Visible)</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Confirm: Shown, not editable</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -363,11 +400,11 @@ export function OpsLockVisibleOverridesModal({ open, data, onCancel, onKeepOverr
         <div className="mb-6 space-y-4">
           <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded">
             <p className="text-sm text-amber-900 font-semibold mb-2">
-              You are setting Ops Lock to <span className="font-bold">Locked (Visible)</span>.
+              You are setting this to <span className="font-bold">Shown, not editable</span>.
             </p>
             <p className="text-sm text-amber-800 leading-relaxed">
-              PM will still see this setting but cannot change defaults or manage overrides while it is Ops-locked.
-              Existing doctor overrides can either be kept (and will reappear if Ops unlocks later) or removed now.
+              Practice managers will still see this setting but cannot change the practice value while this restriction is active.
+              Existing user-specific settings can either be kept (and reappear if restrictions are lifted later) or removed now.
             </p>
           </div>
 

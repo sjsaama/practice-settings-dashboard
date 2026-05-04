@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import {
+  DELETE_CONSULTS_SETTING_ID,
+  EHR_PULL_LOOK_AHEAD_SETTING_ID,
+  MAX_WINDOW_DAYS,
+  buildDayOptions,
+  clampRangeSelectorValue,
+  formatDayLabel,
+  getCacheWindowBounds,
+  normalizeCacheWindowValue,
+} from '../../utils/syncWindowRules';
 
 export default function AddOverrideModal({
   open,
@@ -18,6 +28,7 @@ export default function AddOverrideModal({
   getMatchingOverrideAlertMessage,
   doesOverrideMatchDefault,
   setUserSetting,
+  getModuleCapabilities,
   onClose,
 }) {
   const [selectedUserId, setSelectedUserId] = useState('');
@@ -37,6 +48,9 @@ export default function AddOverrideModal({
       if ((settingType === 'order-list' || settingType === 'time-multiselect' || settingType === 'multiselect') && overrideValue === '') {
         setOverrideValue(JSON.stringify(Array.isArray(defaultValue) ? defaultValue : []));
       }
+      if (settingType === 'keyword-list' && overrideValue === '') {
+        setOverrideValue(JSON.stringify(Array.isArray(defaultValue) ? defaultValue : []));
+      }
     }
   }, [open, currentOverrideSetting, overrideValue]);
 
@@ -45,6 +59,8 @@ export default function AddOverrideModal({
   }, [overrideValue, overrideLockState, overrideDefaultService, validationError]);
 
   const { moduleId, settingId, settingName, settingType, settingOptions, defaultValue } = currentOverrideSetting || {};
+  const moduleCapabilities = getModuleCapabilities?.(moduleId);
+  const usesVisibilityEditabilityUI = moduleCapabilities?.usesVisibilityEditabilityUI === true;
   const setting = moduleSettings[moduleId]?.settings.find((s) => s.id === settingId);
   const isLockedVisibleByOps = setting?.opsLockState === 'locked-visible';
   const isLockedHiddenByOps = setting?.opsLockState === 'locked-hidden';
@@ -70,6 +86,25 @@ export default function AddOverrideModal({
     }
   };
 
+  const toggleOnValue = Array.isArray(settingOptions) && settingOptions.length > 0
+    ? (settingOptions.includes('True')
+      ? 'True'
+      : settingOptions.includes('Yes')
+        ? 'Yes'
+        : settingOptions.includes('On')
+          ? 'On'
+          : settingOptions[0])
+    : 'True';
+  const toggleOffValue = Array.isArray(settingOptions) && settingOptions.length > 1
+    ? (settingOptions.includes('False')
+      ? 'False'
+      : settingOptions.includes('No')
+        ? 'No'
+        : settingOptions.includes('Off')
+          ? 'Off'
+          : settingOptions[1])
+    : 'False';
+
   const getEffectiveSettingValue = useCallback((targetUserId, targetModuleId, targetSettingId) => {
     const baseSetting = moduleSettings[targetModuleId]?.settings.find((s) => s.id === targetSettingId);
     const override = getUserSetting?.(targetUserId, targetModuleId, targetSettingId);
@@ -78,6 +113,50 @@ export default function AddOverrideModal({
 
   const isCombinedEmailOverride = moduleId === 'controls' && settingId === 22;
   const isCombinedAthenaOverride = moduleId === 'ehr-settings-athena' && settingId === 84;
+  const effectiveDeleteConsultsValue = selectedUserId
+    ? getEffectiveSettingValue(selectedUserId, 'controls', DELETE_CONSULTS_SETTING_ID)
+    : moduleSettings.controls?.settings.find((s) => s.id === DELETE_CONSULTS_SETTING_ID)?.default;
+  const effectiveEhrLookAheadValue = selectedUserId
+    ? getEffectiveSettingValue(selectedUserId, 'controls', EHR_PULL_LOOK_AHEAD_SETTING_ID)
+    : moduleSettings.controls?.settings.find((s) => s.id === EHR_PULL_LOOK_AHEAD_SETTING_ID)?.default;
+  const cacheWindowBounds = getCacheWindowBounds({
+    deleteConsultsValue: effectiveDeleteConsultsValue,
+    ehrLookAheadValue: effectiveEhrLookAheadValue,
+    maxDays: MAX_WINDOW_DAYS
+  });
+  const rangeSelectorOptions = Array.isArray(settingOptions) && settingOptions.length > 0
+    ? settingOptions
+    : buildDayOptions(MAX_WINDOW_DAYS);
+  const overrideVisibility = overrideLockState === 'locked-hidden' ? 'hidden' : 'shown';
+  const overrideEditability = overrideLockState === 'unlocked' ? 'editable' : 'not-editable';
+  const canSetOverrideEditable = !isLockedVisibleByOps;
+  const canSetOverrideNotEditable = true;
+  const canSetOverrideHidden = true;
+  const ToggleSwitch = ({ checked, onChange, disabled, onLabel, offLabel }) => (
+    <div className="flex items-center gap-3">
+      <span className={`text-xs ${!checked ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>{offLabel}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return;
+          onChange(!checked);
+        }}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+          checked ? 'bg-blue-600' : 'bg-gray-300'
+        } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+            checked ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
+      </button>
+      <span className={`text-xs ${checked ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>{onLabel}</span>
+    </div>
+  );
 
   useEffect(() => {
     if (!open || !currentOverrideSetting) return;
@@ -120,6 +199,51 @@ export default function AddOverrideModal({
     setOverrideValue(effectiveAthena === 'Yes' ? 'embedded-only' : 'disabled');
   }, [open, currentOverrideSetting, selectedUserId, isCombinedAthenaOverride, overrideValue, getEffectiveSettingValue]);
 
+  useEffect(() => {
+    if (!open || !currentOverrideSetting) return;
+    if (!selectedUserId || settingType !== 'range-selector' || overrideValue !== '') return;
+
+    const effectiveRangeValue = getEffectiveSettingValue(selectedUserId, moduleId, settingId);
+    const normalizedValue = clampRangeSelectorValue(
+      effectiveRangeValue,
+      rangeSelectorOptions,
+      defaultValue
+    );
+    if (typeof normalizedValue === 'string') {
+      setOverrideValue(normalizedValue);
+    }
+  }, [
+    open,
+    currentOverrideSetting,
+    selectedUserId,
+    settingType,
+    overrideValue,
+    getEffectiveSettingValue,
+    moduleId,
+    settingId,
+    settingOptions,
+    rangeSelectorOptions,
+    defaultValue
+  ]);
+
+  useEffect(() => {
+    if (!open || !currentOverrideSetting) return;
+    if (!selectedUserId || settingType !== 'cache-window-combined' || overrideValue !== '') return;
+    const effectiveWindowValue = getEffectiveSettingValue(selectedUserId, moduleId, settingId);
+    const normalized = normalizeCacheWindowValue(effectiveWindowValue, cacheWindowBounds);
+    setOverrideValue(JSON.stringify(normalized));
+  }, [
+    open,
+    currentOverrideSetting,
+    selectedUserId,
+    settingType,
+    overrideValue,
+    getEffectiveSettingValue,
+    moduleId,
+    settingId,
+    cacheWindowBounds
+  ]);
+
   if (!open || !currentOverrideSetting) return null;
 
   const setSelectedListValues = (nextValues) => {
@@ -128,7 +252,7 @@ export default function AddOverrideModal({
 
   const handleSave = () => {
     if (isMasterUser()) {
-      alert('OPS can no longer manage user overrides.');
+      alert('Ops users cannot change user-specific settings.');
       return;
     }
 
@@ -138,7 +262,7 @@ export default function AddOverrideModal({
     }
 
     if (!isMasterUser() && isLockedHiddenByOps) {
-      alert('This setting is locked hidden by Ops. PM cannot manage overrides.');
+      alert('Edit not allowed. This setting is hidden and cannot be changed here.');
       return;
     }
     if (!selectedUserId) {
@@ -147,17 +271,21 @@ export default function AddOverrideModal({
     }
 
     if (!overrideLockState) {
-      alert('Choose an access state.');
+      alert('Choose user access.');
       return;
     }
 
     if (!isMasterUser() && isLockedVisibleByOps && !['locked-visible', 'locked-hidden'].includes(overrideLockState)) {
-      alert('Under Ops Locked Visible, PM can only set override lock state to Locked Visible or Locked Hidden.');
+      alert(
+        usesVisibilityEditabilityUI
+          ? 'Edit not allowed. You can only choose "Shown, not editable" or Hidden.'
+          : 'Edit not allowed. You can only choose "Shown, not editable" or Hidden.'
+      );
       return;
     }
 
     if (overrideLockState !== 'locked-hidden' && overrideValue === '') {
-      alert('Please set an override value');
+      alert('Please set a user value');
       return;
     }
 
@@ -168,7 +296,14 @@ export default function AddOverrideModal({
     }
 
     let valueToSet = overrideValue === '' ? defaultValue : overrideValue;
-    if (settingType === 'order-list' || settingType === 'time-multiselect' || settingType === 'multiselect' || settingType === 'service-settings-combined') {
+    if (
+      settingType === 'order-list' ||
+      settingType === 'time-multiselect' ||
+      settingType === 'multiselect' ||
+      settingType === 'keyword-list' ||
+      settingType === 'service-settings-combined' ||
+      settingType === 'cache-window-combined'
+    ) {
       if (typeof valueToSet === 'string' && valueToSet !== '') {
         try {
           valueToSet = JSON.parse(valueToSet);
@@ -176,6 +311,9 @@ export default function AddOverrideModal({
           // keep as-is
         }
       }
+    }
+    if (settingType === 'cache-window-combined') {
+      valueToSet = normalizeCacheWindowValue(valueToSet, cacheWindowBounds);
     }
 
     if (settingType === 'service-settings-combined' && overrideLockState !== 'locked-hidden') {
@@ -255,7 +393,7 @@ export default function AddOverrideModal({
     <div className="fixed inset-0 bg-black bg-opacity-45 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 border border-gray-200 shadow-xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Add custom setting</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Customize for a user</h3>
           <button onClick={resetAndClose} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -276,7 +414,7 @@ export default function AddOverrideModal({
           )}
 
           <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">Practice default:</p>
+                <p className="text-sm font-medium text-gray-700 mb-2">Practice value:</p>
             <p className="text-sm text-blue-700 font-semibold bg-blue-50 p-3 rounded-md">
               {settingType === 'email-delivery-combined'
                 ? `Send Note: ${defaultValue?.sendNote || 'False'} | Send Transcript: ${defaultValue?.sendTranscript || 'False'}`
@@ -284,6 +422,8 @@ export default function AddOverrideModal({
                 ? `Enabled: ${defaultValue.default?.join(', ') || defaultValue.join(', ')} | Default: ${defaultValue.defaultService}`
                 : settingType === 'athena-embedded-combined'
                 ? `Embedded: ${defaultValue?.enableEmbeddedApp || 'No'} | Auto Pull: ${defaultValue?.autoPullInEmbeddedApp || 'No'}`
+                : settingType === 'cache-window-combined'
+                ? `Ahead: ${defaultValue?.aheadDays || '8 days'} | Back: ${defaultValue?.backDays || '7 days'}`
                 : (Array.isArray(defaultValue) ? defaultValue.join(', ') : defaultValue)}
             </p>
           </div>
@@ -306,38 +446,142 @@ export default function AddOverrideModal({
 
           {selectedUserId && !isLockedVisibleByOps && overrideLockState !== 'locked-hidden' && (
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">Custom value:</label>
-              {(settingType === 'dropdown' || settingType === 'range-selector') && (
+              <label className="text-sm font-medium text-gray-700 block mb-2">User value:</label>
+              {settingType === 'dropdown' && (
                 <select
                   value={overrideValue}
                   onChange={(e) => setOverrideValue(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="">-- Select override value --</option>
+                  <option value="">-- Select user value --</option>
                   {settingOptions.map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
               )}
+              {settingType === 'range-selector' && (
+                <div className="space-y-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, rangeSelectorOptions.length - 1)}
+                    step={1}
+                    value={Math.max(
+                      0,
+                      rangeSelectorOptions.indexOf(
+                        clampRangeSelectorValue(
+                          overrideValue || defaultValue,
+                          rangeSelectorOptions,
+                          defaultValue
+                        )
+                      )
+                    )}
+                    onChange={(e) => {
+                      const nextValue = rangeSelectorOptions[Number(e.target.value)];
+                      if (nextValue !== undefined) setOverrideValue(nextValue);
+                    }}
+                    className="w-full accent-indigo-600"
+                  />
+                  <p className="text-lg font-semibold text-indigo-700">
+                    {clampRangeSelectorValue(overrideValue || defaultValue, rangeSelectorOptions, defaultValue)}
+                  </p>
+                </div>
+              )}
+              {settingType === 'cache-window-combined' && (
+                <div className="space-y-4">
+                  {(() => {
+                    const normalized = normalizeCacheWindowValue(
+                      (() => {
+                        try {
+                          return overrideValue ? JSON.parse(overrideValue) : defaultValue;
+                        } catch {
+                          return defaultValue;
+                        }
+                      })(),
+                      cacheWindowBounds
+                    );
+                    const aheadOptions = buildDayOptions(cacheWindowBounds.maxAheadDays);
+                    const backOptions = buildDayOptions(cacheWindowBounds.maxBackDays);
+                    const aheadIndex = Math.max(0, aheadOptions.indexOf(normalized.aheadDays));
+                    const backIndex = Math.max(0, backOptions.indexOf(normalized.backDays));
+                    return (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-gray-700 block">Local cache look ahead</label>
+                          <input
+                            type="range"
+                            min={0}
+                            max={Math.max(0, aheadOptions.length - 1)}
+                            step={1}
+                            value={aheadIndex}
+                            onChange={(e) => {
+                              const nextAhead = aheadOptions[Number(e.target.value)];
+                              if (!nextAhead) return;
+                              setOverrideValue(JSON.stringify({
+                                ...normalized,
+                                aheadDays: nextAhead
+                              }));
+                            }}
+                            className="w-full accent-indigo-600"
+                          />
+                          <p className="text-lg font-semibold text-indigo-700">{normalized.aheadDays}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-gray-700 block">Local cache look back</label>
+                          <input
+                            type="range"
+                            min={0}
+                            max={Math.max(0, backOptions.length - 1)}
+                            step={1}
+                            value={backIndex}
+                            onChange={(e) => {
+                              const nextBack = backOptions[Number(e.target.value)];
+                              if (!nextBack) return;
+                              setOverrideValue(JSON.stringify({
+                                ...normalized,
+                                backDays: nextBack
+                              }));
+                            }}
+                            className="w-full accent-indigo-600"
+                          />
+                          <p className="text-lg font-semibold text-indigo-700">{normalized.backDays}</p>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          EHR limits: ahead up to {formatDayLabel(cacheWindowBounds.maxAheadDays)}, back up to {formatDayLabel(cacheWindowBounds.maxBackDays)}.
+                        </p>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
               {settingType === 'toggle' && (
                 <div className="flex items-center gap-4">
                   <button
-                    onClick={() => setOverrideValue('True')}
+                    onClick={() => setOverrideValue(toggleOnValue)}
                     className={`px-4 py-2 rounded-md transition-colors ${
-                      overrideValue === 'True' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      overrideValue === toggleOnValue ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                   >
-                    True
+                    {toggleOnValue}
                   </button>
                   <button
-                    onClick={() => setOverrideValue('False')}
+                    onClick={() => setOverrideValue(toggleOffValue)}
                     className={`px-4 py-2 rounded-md transition-colors ${
-                      overrideValue === 'False' ? 'bg-gray-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      overrideValue === toggleOffValue ? 'bg-gray-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                   >
-                    False
+                    {toggleOffValue}
                   </button>
                 </div>
+              )}
+              {settingType === 'text' && (
+                <input
+                  type="text"
+                  value={overrideValue}
+                  onChange={(e) => setOverrideValue(e.target.value)}
+                  placeholder="Enter user value"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
               )}
               {isCombinedEmailOverride && selectedUserId && (
                 <div className="mt-4">
@@ -388,6 +632,26 @@ export default function AddOverrideModal({
                       </label>
                     );
                   })}
+                </div>
+              )}
+              {settingType === 'keyword-list' && (
+                <div className="space-y-2">
+                  <textarea
+                    value={getSelectedListValues().join('\n')}
+                    onChange={(e) => {
+                      const next = e.target.value
+                        .split(/[\n,;]/g)
+                        .map((token) => token.trim())
+                        .filter(Boolean);
+                      setSelectedListValues([...new Set(next)]);
+                    }}
+                    rows={6}
+                    placeholder="Enter one value per line (or comma separated)"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="text-xs text-gray-500">
+                    You can enter values line-by-line, comma-separated, or semicolon-separated.
+                  </p>
                 </div>
               )}
               {settingType === 'service-settings-combined' && (
@@ -476,7 +740,9 @@ export default function AddOverrideModal({
           {selectedUserId && isLockedVisibleByOps && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
               <p className="text-xs text-amber-800">
-                Ops Lock active: only Locked Visible or Locked Hidden are allowed.
+                {usesVisibilityEditabilityUI
+                  ? 'Edit not allowed: only "Shown, not editable" or Hidden are allowed.'
+                  : 'Edit not allowed: only "Shown, not editable" or Hidden are allowed.'}
               </p>
             </div>
           )}
@@ -484,35 +750,67 @@ export default function AddOverrideModal({
           {selectedUserId && overrideLockState === 'locked-hidden' && (
             <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
               <p className="text-sm text-yellow-800">
-                <strong>Note:</strong> Setting will be hidden from this user. No override value is required since they won't see this setting.
+                <strong>Note:</strong> This setting will be hidden for this user. No user value is required when hidden.
               </p>
             </div>
           )}
 
           {selectedUserId && (
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">Access state:</label>
-              <div className={`grid gap-2 ${isLockedVisibleByOps ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                {(isLockedVisibleByOps ? ['locked-visible', 'locked-hidden'] : ['unlocked', 'locked-visible', 'locked-hidden']).map((lock) => (
-                  <button
-                    key={lock}
-                    onClick={() => setOverrideLockState(lock)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      overrideLockState === lock
-                        ? lock === 'unlocked'
-                          ? 'bg-green-600 text-white'
-                          : lock === 'locked-visible'
-                            ? 'bg-orange-600 text-white'
-                            : 'bg-red-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {lock === 'unlocked' ? 'Unlocked' : lock === 'locked-visible' ? 'Locked Visible' : 'Locked Hidden'}
-                  </button>
-                ))}
-              </div>
+              {usesVisibilityEditabilityUI ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-2">Visibility:</label>
+                    <ToggleSwitch
+                      checked={overrideVisibility === 'shown'}
+                      onChange={(isShown) => setOverrideLockState(isShown ? (overrideEditability === 'editable' ? 'unlocked' : 'locked-visible') : 'locked-hidden')}
+                      disabled={!canSetOverrideHidden && overrideVisibility === 'shown'}
+                      onLabel="Shown"
+                      offLabel="Hidden"
+                    />
+                  </div>
+
+                  {overrideVisibility === 'shown' && canSetOverrideEditable && canSetOverrideNotEditable && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 block mb-2">Editability:</label>
+                      <ToggleSwitch
+                        checked={overrideEditability === 'editable'}
+                        onChange={(isEditable) => setOverrideLockState(isEditable ? 'unlocked' : 'locked-visible')}
+                        disabled={false}
+                        onLabel="Editable"
+                        offLabel="Not editable"
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <label className="text-sm font-medium text-gray-700 block mb-2">User access:</label>
+                  <div className={`grid gap-2 ${isLockedVisibleByOps ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {(isLockedVisibleByOps ? ['locked-visible', 'locked-hidden'] : ['unlocked', 'locked-visible', 'locked-hidden']).map((lock) => (
+                      <button
+                        key={lock}
+                        onClick={() => setOverrideLockState(lock)}
+                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          overrideLockState === lock
+                            ? lock === 'unlocked'
+                              ? 'bg-green-600 text-white'
+                              : lock === 'locked-visible'
+                                ? 'bg-orange-600 text-white'
+                                : 'bg-red-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {lock === 'unlocked' ? 'Shown, editable' : lock === 'locked-visible' ? 'Shown, not editable' : 'Hidden'}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               {!overrideLockState && (
-                <p className="text-xs text-amber-700 mt-2">Choose an access state.</p>
+                <p className="text-xs text-amber-700 mt-2">
+                  Choose user access.
+                </p>
               )}
             </div>
           )}
@@ -521,7 +819,7 @@ export default function AddOverrideModal({
 
         {availableUsers.length === 0 && (
           <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-            <p className="text-sm text-yellow-800">All users already have overrides for this setting.</p>
+            <p className="text-sm text-yellow-800">All users already have user-specific settings for this item.</p>
           </div>
         )}
 
@@ -559,7 +857,7 @@ export default function AddOverrideModal({
             disabled={!selectedUserId || !overrideLockState || (overrideLockState !== 'locked-hidden' && overrideValue === '') || availableUsers.length === 0}
             className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
-            Save custom setting
+            Save user setting
           </button>
         </div>
       </div>

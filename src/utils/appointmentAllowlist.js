@@ -1,4 +1,4 @@
-const APPOINTMENT_ALLOWLIST_SETTING_NAME = 'Appointment Allowlist';
+const APPOINTMENT_ALLOWLIST_SETTING_NAME = 'Appointment Type Allowlist';
 
 export const getAppointmentAllowlist = (moduleSettings, ehrModuleKey) => {
   const settings = moduleSettings?.[ehrModuleKey]?.settings;

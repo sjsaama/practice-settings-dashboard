@@ -87,7 +87,10 @@ export function AddSecondaryAccountModal({
               ['createConsults', 'Create Consults', 'Create consult cards. Create recordings and upload docs.'],
               ['canGenerateNotes', 'Can Generate Notes', 'Can generate notes from consults'],
               ['editGeneratedNotes', 'Edit Generated Notes', 'Can Modify Generated notes'],
-              ['pushToEHR', 'Push to EHR', 'Can push generated notes to EHR']
+              ['pushToEHR', 'Push to EHR', 'Can push generated notes to EHR'],
+              ['defaultNoteView', 'Default Note View', 'Can configure the default note layout for generated notes.'],
+              ['twoFactorAuth', '2FA', 'Can enable or disable two-factor authentication for account login.'],
+              ['playRecordingConsentDisclaimer', 'Play Recording Consent Disclaimer', 'Can configure playback of consent disclaimer before consult recordings.']
             ].map(([key, label, desc]) => {
               const enabled = isPermissionEnabled(key);
               const checked = newSecondaryAccount.permissions[key];

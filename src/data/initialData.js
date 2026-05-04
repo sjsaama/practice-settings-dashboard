@@ -92,7 +92,10 @@ export const initialUsers = [
       mergeAndLinkAppointments: false,
       canGenerateNotes: false,
       editGeneratedNotes: false,
-      pushToEHR: false
+      pushToEHR: false,
+      defaultNoteView: false,
+      twoFactorAuth: false,
+      playRecordingConsentDisclaimer: false
     }
   },
   {
@@ -106,7 +109,10 @@ export const initialUsers = [
       mergeAndLinkAppointments: false,
       canGenerateNotes: false,
       editGeneratedNotes: false,
-      pushToEHR: false
+      pushToEHR: false,
+      defaultNoteView: false,
+      twoFactorAuth: false,
+      playRecordingConsentDisclaimer: false
     }
   }
 ];

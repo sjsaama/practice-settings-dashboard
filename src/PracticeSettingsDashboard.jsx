@@ -17,7 +17,7 @@ import LinkedAssignmentModal from './components/dashboard/LinkedAssignmentModal'
 import { AddPrimaryAccountModal, AddSecondaryAccountModal } from './components/dashboard/AccountModals';
 import AddOverrideModal from './components/dashboard/AddOverrideModal';
 import SettingRow from './components/dashboard/SettingRow';
-import { settingsModules as initialSettingsModules } from './data/settingsData';
+import { getModuleCapabilities, settingsModules as initialSettingsModules } from './data/settingsData';
 import { initialLinkedAssignments, initialUsers } from './data/initialData';
 import {
   canLoginAsMasterUser,
@@ -60,6 +60,14 @@ import {
   valuesAreEqual,
   getMatchingOverrideAlertMessage
 } from './utils/validationHelpers';
+import {
+  DELETE_CONSULTS_SETTING_ID,
+  EHR_PULL_LOOK_AHEAD_SETTING_ID,
+  LOCAL_CACHE_WINDOW_SETTING_ID,
+  MAX_WINDOW_DAYS,
+  getCacheWindowBounds,
+  normalizeCacheWindowValue,
+} from './utils/syncWindowRules';
 import { normalizeDependentSettings } from './utils/settingsNormalization';
 import {
   filterAppointmentsByAllowlist,
@@ -159,6 +167,19 @@ const needsSeedMerge = (seededModules, currentModules) => {
 };
 
 const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLogout }) => {
+  const ehrModuleKeys = new Set([
+    'ehr-settings-athena',
+    'ehr-settings-amd',
+    'ehr-settings-ecw',
+    'ehr-settings-athenaflow',
+    'ehr-settings-charm',
+    'ehr-settings-drchrono',
+    'ehr-settings-nereg',
+    'ehr-settings-greenway',
+    'ehr-settings-veradigm-allscripts',
+    'ehr-settings-modmed',
+    'ehr-settings-google-meet'
+  ]);
   // Auth (provided by App)
   const currentUserEmail = authSession?.email || 'pm@practice.com';
   const currentUserRole = authSession?.role || 'pm';
@@ -253,7 +274,10 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
       mergeAndLinkAppointments: false,
       canGenerateNotes: false,
       editGeneratedNotes: false,
-      pushToEHR: false
+      pushToEHR: false,
+      defaultNoteView: false,
+      twoFactorAuth: false,
+      playRecordingConsentDisclaimer: false
     }
   });
 
@@ -624,6 +648,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
     setUserSettingsOverrides(prev => {
       const key = `${userId}-${moduleId}-${settingId}`;
+      const controlsSettings = moduleSettings.controls?.settings || [];
+      const deleteConsultsSetting = controlsSettings.find((s) => s.id === DELETE_CONSULTS_SETTING_ID);
+      const ehrPullLookAheadSetting = controlsSettings.find((s) => s.id === EHR_PULL_LOOK_AHEAD_SETTING_ID);
+      const localCacheWindowSetting = controlsSettings.find((s) => s.id === LOCAL_CACHE_WINDOW_SETTING_ID);
+
       const next = {
         ...prev,
         [key]: {
@@ -644,6 +673,42 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
           ...next[key],
           value: { sendNote, sendTranscript }
         };
+      }
+
+      if (moduleId === 'controls' && property === 'value') {
+        const effectiveDeleteConsultsValue = (
+          settingId === DELETE_CONSULTS_SETTING_ID
+            ? value
+            : (next[`${userId}-controls-${DELETE_CONSULTS_SETTING_ID}`]?.value ?? deleteConsultsSetting?.default)
+        );
+        const effectiveEhrLookAheadValue = (
+          settingId === EHR_PULL_LOOK_AHEAD_SETTING_ID
+            ? value
+            : (next[`${userId}-controls-${EHR_PULL_LOOK_AHEAD_SETTING_ID}`]?.value ?? ehrPullLookAheadSetting?.default)
+        );
+        const cacheWindowBounds = getCacheWindowBounds({
+          deleteConsultsValue: effectiveDeleteConsultsValue,
+          ehrLookAheadValue: effectiveEhrLookAheadValue,
+          maxDays: MAX_WINDOW_DAYS
+        });
+
+        if (settingId === LOCAL_CACHE_WINDOW_SETTING_ID && localCacheWindowSetting) {
+          next[key] = {
+            ...next[key],
+            value: normalizeCacheWindowValue(value, cacheWindowBounds)
+          };
+        }
+
+        if ((settingId === DELETE_CONSULTS_SETTING_ID || settingId === EHR_PULL_LOOK_AHEAD_SETTING_ID) && localCacheWindowSetting) {
+          const localCacheKey = `${userId}-controls-${LOCAL_CACHE_WINDOW_SETTING_ID}`;
+          const existingLocalCacheValue = next[localCacheKey]?.value;
+          if (existingLocalCacheValue !== undefined) {
+            next[localCacheKey] = {
+              ...next[localCacheKey],
+              value: normalizeCacheWindowValue(existingLocalCacheValue, cacheWindowBounds)
+            };
+          }
+        }
       }
 
       return next;
@@ -857,15 +922,76 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     }
 
     // If no redundant overrides or not changing default/lock state, proceed with update
-    setModuleSettings(prev => ({
-      ...prev,
-      [moduleId]: {
-        ...prev[moduleId],
-        settings: prev[moduleId].settings.map(setting =>
-          setting.id === settingId ? { ...setting, [property]: value } : setting
-        )
+    setModuleSettings(prev => {
+      const nextSettings = prev[moduleId].settings.map((setting) => {
+        if (setting.id !== settingId) return setting;
+        return { ...setting, [property]: value };
+      });
+
+      if (moduleId === 'controls' && property === 'default') {
+        const deleteSettingAfterUpdate = nextSettings.find((s) => s.id === DELETE_CONSULTS_SETTING_ID);
+        const ehrPullLookAheadAfterUpdate = nextSettings.find((s) => s.id === EHR_PULL_LOOK_AHEAD_SETTING_ID);
+        const localCacheWindowSetting = nextSettings.find((s) => s.id === LOCAL_CACHE_WINDOW_SETTING_ID);
+        if (localCacheWindowSetting) {
+          const effectiveDeleteValue = settingId === DELETE_CONSULTS_SETTING_ID ? value : deleteSettingAfterUpdate?.default;
+          const effectiveEhrAheadValue = settingId === EHR_PULL_LOOK_AHEAD_SETTING_ID ? value : ehrPullLookAheadAfterUpdate?.default;
+          const cacheWindowBounds = getCacheWindowBounds({
+            deleteConsultsValue: effectiveDeleteValue,
+            ehrLookAheadValue: effectiveEhrAheadValue,
+            maxDays: MAX_WINDOW_DAYS
+          });
+          const normalizedCacheDefault = normalizeCacheWindowValue(localCacheWindowSetting.default, cacheWindowBounds);
+          const localCacheIndex = nextSettings.findIndex((s) => s.id === LOCAL_CACHE_WINDOW_SETTING_ID);
+          nextSettings[localCacheIndex] = {
+            ...nextSettings[localCacheIndex],
+            default: normalizedCacheDefault
+          };
+        }
       }
-    }));
+
+      return {
+        ...prev,
+        [moduleId]: {
+          ...prev[moduleId],
+          settings: nextSettings
+        }
+      };
+    });
+
+    if (
+      moduleId === 'controls' &&
+      property === 'default' &&
+      (settingId === DELETE_CONSULTS_SETTING_ID || settingId === EHR_PULL_LOOK_AHEAD_SETTING_ID)
+    ) {
+      const controlsSettings = moduleSettings.controls?.settings || [];
+      const deleteConsultsSetting = controlsSettings.find((s) => s.id === DELETE_CONSULTS_SETTING_ID);
+      const ehrPullLookAheadSetting = controlsSettings.find((s) => s.id === EHR_PULL_LOOK_AHEAD_SETTING_ID);
+      if (deleteConsultsSetting && ehrPullLookAheadSetting) {
+        setUserSettingsOverrides((prevOverrides) => {
+          const updated = { ...prevOverrides };
+          Object.keys(updated).forEach((key) => {
+            if (!key.endsWith(`-controls-${LOCAL_CACHE_WINDOW_SETTING_ID}`)) return;
+            const userId = key.slice(0, key.indexOf('-controls-'));
+            const userDeleteConsultsOverride = updated[`${userId}-controls-${DELETE_CONSULTS_SETTING_ID}`]?.value;
+            const userEhrPullAheadOverride = updated[`${userId}-controls-${EHR_PULL_LOOK_AHEAD_SETTING_ID}`]?.value;
+            const effectiveDeleteConsultsValue = userDeleteConsultsOverride ?? (settingId === DELETE_CONSULTS_SETTING_ID ? value : deleteConsultsSetting.default);
+            const effectiveEhrPullAheadValue = userEhrPullAheadOverride ?? (settingId === EHR_PULL_LOOK_AHEAD_SETTING_ID ? value : ehrPullLookAheadSetting.default);
+            const currentLocalCacheValue = updated[key]?.value;
+            if (currentLocalCacheValue === undefined) return;
+            const cacheWindowBounds = getCacheWindowBounds({
+              deleteConsultsValue: effectiveDeleteConsultsValue,
+              ehrLookAheadValue: effectiveEhrPullAheadValue,
+              maxDays: MAX_WINDOW_DAYS
+            });
+            updated[key] = {
+              ...updated[key],
+              value: normalizeCacheWindowValue(currentLocalCacheValue, cacheWindowBounds)
+            };
+          });
+          return updated;
+        });
+      }
+    }
   };
 
   // Helper functions for settings logic
@@ -967,6 +1093,9 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
       case 'createConsults':
       case 'canGenerateNotes':
       case 'mergeAndLinkAppointments':
+      case 'defaultNoteView':
+      case 'twoFactorAuth':
+      case 'playRecordingConsentDisclaimer':
         return true;
       case 'editGeneratedNotes':
         return newSecondaryAccount.permissions.canGenerateNotes;
@@ -1000,9 +1129,13 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
       email: '',
       permissions: {
         createConsults: true,
+        mergeAndLinkAppointments: false,
         canGenerateNotes: false,
         editGeneratedNotes: false,
-        pushToEHR: false
+        pushToEHR: false,
+        defaultNoteView: false,
+        twoFactorAuth: false,
+        playRecordingConsentDisclaimer: false
       }
     });
   };
@@ -1061,7 +1194,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
 
           {currentView === 'settings' && (
             <div className="ml-6 space-y-1 border-l-2 border-gray-200 pl-4">
-              {Object.entries(moduleSettings).map(([key, module]) => (
+              {Object.entries(moduleSettings).filter(([key]) => key !== 'practice-properties').map(([key, module]) => (
                 <button
                   key={key}
                   onClick={() => setSelectedModule(key)}
@@ -1071,6 +1204,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                 >
                   <div className="flex items-center gap-2">
                     <span>{module.name}</span>
+                    {ehrModuleKeys.has(key) && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800">
+                        EHR
+                      </span>
+                    )}
                     {key === 'teleconsult-settings' && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
                         User Only
@@ -1082,6 +1220,16 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
               ))}
             </div>
           )}
+
+          <button
+            onClick={() => setCurrentView('practice-properties')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+              currentView === 'practice-properties' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <Settings className="w-5 h-5" />
+            Practice Properties
+          </button>
 
           <button
             onClick={() => setCurrentView('users')}
@@ -1321,8 +1469,65 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
               setIsGoogleSignedIn={setIsGoogleSignedIn}
               setShowGoogleSignoutModal={setShowGoogleSignoutModal}
               onRequestAttestation={() => setShowEmailModal(true)}
+              moduleCapabilities={getModuleCapabilities(selectedModule)}
             />
           ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const PracticePropertiesView = () => (
+    <div className="flex-1 p-6 bg-gray-50 min-h-screen">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+                {moduleSettings['practice-properties']?.name || 'Practice Properties'}
+              </h1>
+              {moduleSettings['practice-properties']?.subtitle && (
+                <p className="text-gray-600">{moduleSettings['practice-properties'].subtitle}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {moduleSettings['practice-properties']?.settings
+            .filter(setting => {
+              if (!isMasterUser() && setting.opsLockState === 'locked-hidden') return false;
+              return true;
+            })
+            .map(setting => (
+              <SettingRow
+                key={setting.id}
+                setting={setting}
+                moduleId="practice-properties"
+                isSettingEnabled={isSettingEnabled}
+                getAvailableOptions={getAvailableOptions}
+                isMasterUser={isMasterUser}
+                getSettingById={getSettingById}
+                getUserSetting={getUserSetting}
+                doesOverrideMatchDefault={doesOverrideMatchDefault}
+                getMatchingOverrideAlertMessage={getMatchingOverrideAlertMessage}
+                valuesAreEqual={valuesAreEqual}
+                setPendingSettingChange={setPendingSettingChange}
+                setShowOverrideConfirmModal={setShowOverrideConfirmModal}
+                removeUserSetting={removeUserSetting}
+                setUserSetting={setUserSetting}
+                updateSettingState={updateSettingState}
+                isPMReadOnly={isPMReadOnly}
+                getSettingOverrides={getSettingOverrides}
+                setCurrentOverrideSetting={setCurrentOverrideSetting}
+                setShowAddOverrideModal={setShowAddOverrideModal}
+                moduleSettings={moduleSettings}
+                isGoogleSignedIn={isGoogleSignedIn}
+                setIsGoogleSignedIn={setIsGoogleSignedIn}
+                setShowGoogleSignoutModal={setShowGoogleSignoutModal}
+                onRequestAttestation={() => setShowEmailModal(true)}
+              />
+            ))}
         </div>
       </div>
     </div>
@@ -1951,6 +2156,67 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                     </div>
                   </div>
 
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-gray-700 text-lg">Default Note View</p>
+                      <p className="text-sm text-gray-500 mt-1">Can configure the default note layout (Section or Full Note view)</p>
+                    </div>
+                    <div
+                      className={`relative w-14 h-8 rounded-full cursor-pointer transition-colors duration-300 ${
+                        selectedUser.permissions.defaultNoteView ? 'bg-green-500' : 'bg-gray-300'
+                      }`}
+                      onClick={() => updateUserPermission(selectedUser.id, 'defaultNoteView', !selectedUser.permissions.defaultNoteView)}
+                    >
+                      <div
+                        className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
+                          selectedUser.permissions.defaultNoteView ? 'translate-x-7' : 'translate-x-1'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-gray-700 text-lg">2FA</p>
+                      <p className="text-sm text-gray-500 mt-1">Can enable or disable two-factor authentication for login</p>
+                    </div>
+                    <div
+                      className={`relative w-14 h-8 rounded-full cursor-pointer transition-colors duration-300 ${
+                        selectedUser.permissions.twoFactorAuth ? 'bg-green-500' : 'bg-gray-300'
+                      }`}
+                      onClick={() => updateUserPermission(selectedUser.id, 'twoFactorAuth', !selectedUser.permissions.twoFactorAuth)}
+                    >
+                      <div
+                        className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
+                          selectedUser.permissions.twoFactorAuth ? 'translate-x-7' : 'translate-x-1'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-gray-700 text-lg">Play Recording Consent Disclaimer</p>
+                      <p className="text-sm text-gray-500 mt-1">Can configure whether a consent disclaimer plays before each consult recording</p>
+                    </div>
+                    <div
+                      className={`relative w-14 h-8 rounded-full cursor-pointer transition-colors duration-300 ${
+                        selectedUser.permissions.playRecordingConsentDisclaimer ? 'bg-green-500' : 'bg-gray-300'
+                      }`}
+                      onClick={() => updateUserPermission(
+                        selectedUser.id,
+                        'playRecordingConsentDisclaimer',
+                        !selectedUser.permissions.playRecordingConsentDisclaimer
+                      )}
+                    >
+                      <div
+                        className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${
+                          selectedUser.permissions.playRecordingConsentDisclaimer ? 'translate-x-7' : 'translate-x-1'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
                   <div className="text-sm text-gray-600 mt-6 pt-6 border-t border-gray-300 bg-blue-50 p-4 rounded-lg">
                     <strong className="text-blue-900">Permission Dependencies:</strong>
                     <ul className="mt-2 space-y-1 ml-4 list-disc text-blue-800">
@@ -2138,6 +2404,8 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         <LeftNavigation />
         {currentView === 'settings' ? (
           <SettingsView />
+        ) : currentView === 'practice-properties' ? (
+          <PracticePropertiesView />
         ) : currentView === 'retrieve-consults' ? (
           <RetrieveConsultsView />
         ) : (
@@ -2322,6 +2590,7 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
         getMatchingOverrideAlertMessage={getMatchingOverrideAlertMessage}
         doesOverrideMatchDefault={doesOverrideMatchDefault}
         setUserSetting={setUserSetting}
+        getModuleCapabilities={getModuleCapabilities}
         onClose={() => {
           setShowAddOverrideModal(false);
           setCurrentOverrideSetting(null);

@@ -20,6 +20,8 @@ No separate Ops dashboard. Ops and PM use the same dashboard surface, with role-
 ### Implementation Reference
 For the canonical rules (Ops vs PM permissions, inheritance, and overrides), see:
 - `docs/ACCESS_INHERITANCE_RULES.md`
+- `docs/ACCESS_INHERITANCE_RULES.md` → "Override/default case matrix (PM perspective)" for the full lock-state combination matrix and "matches default" popup rules.
+- `docs/OVERRIDE_DEFAULT_CASE_MATRIX.md` for the standalone version of the same matrix.
 
 ---
 
@@ -415,12 +417,14 @@ If Ops changes default to Central:
 ### 6.2 Controls
 **Purpose:** General practice settings
 
-**Settings (5):**
+**Settings (7):**
 1. Timezone (dropdown)
 2. 2-factor Authentication (toggle)
 3. Email Delivery Mode (`email-delivery-combined`) - send note + send transcript together
 4. Play Recording Consent Disclaimer (toggle)
 5. Delete Consults (dropdown)
+6. EHR Pull Look ahead window (`range-selector`) - future appointment pull window from EHR
+7. Local cache window (`cache-window-combined`) - local DB look-ahead/look-back window constrained within EHR pull bounds
 
 **Override Support:** ✅ Yes
 
@@ -440,11 +444,12 @@ If Ops changes default to Central:
 ### 6.4 EHR Settings - AMD
 **Purpose:** AMD EHR integration settings
 
-**Settings (4):**
-1. Daily appointment sync time (time-multiselect)
-2. Allow repeat note push (toggle)
-3. Push to EHR automatically (toggle)
-4. Appointment Allowlist (keyword-list) - *empty selection means show all appointment types*
+**Settings (5):**
+1. Appointment Type Allowlist (keyword-list) - appointment types that will be pulled from EHR
+2. Appointment Type Blocklist (keyword-list) - appointment types that will not be pulled from EHR
+3. Daily appointment sync time (time-multiselect)
+4. Allow repeat note push (toggle)
+5. Push to EHR automatically (toggle) - when enabled, note is pushed as soon as it is processed
 
 **Override Support:** ✅ Yes
 
@@ -453,12 +458,13 @@ If Ops changes default to Central:
 ### 6.5 EHR Settings - Athena
 **Purpose:** Athena EHR integration settings
 
-**Settings (5):**
+**Settings (6):**
 1. Athena Embedded Mode (`athena-embedded-combined`: Enable / Enable + Pull / Disable)
-2. Daily appointment sync time (time-multiselect)
-3. Allow repeat note push (toggle)
-4. Push to EHR automatically (toggle)
-5. Appointment Allowlist (keyword-list) - *empty selection means show all appointment types*
+2. Appointment Type Allowlist (keyword-list) - appointment types that will be pulled from EHR
+3. Appointment Type Blocklist (keyword-list) - appointment types that will not be pulled from EHR
+4. Daily appointment sync time (time-multiselect)
+5. Allow repeat note push (toggle)
+6. Push to EHR automatically (toggle) - when enabled, note is pushed as soon as it is processed
 
 **Override Support:** ✅ Yes
 
@@ -543,6 +549,9 @@ The app starts with a dedicated authentication flow before the dashboard renders
 - Ops lock-state badge display (read-only indicator for current `opsLockState`)
 - Default value control
 - User override management (PM only)
+- For `note-settings` and all `ehr-settings-*` modules, PM default access is configured via split controls:
+  - `Visibility` (`Show` / `Hide`)
+  - `Editability` (`Editable` / `Not editable`, shown only when visibility is `Show`)
 
 **Input Control:** Varies by setting type (see Section 4)
 
@@ -553,6 +562,7 @@ The app starts with a dedicated authentication flow before the dashboard renders
 - "+ Add Override" button (PM only; under `locked-visible` PM can only adjust override visibility / lock state)
 - Each override shows: user name, value, and remove action (remove action only when `opsLockState` is `unlocked`)
 - For Controls `email-delivery-combined` (Email Delivery Mode), a single override entry point configures both `sendNote` and `sendTranscript` together.
+- For `note-settings` and all `ehr-settings-*` modules, the Add Override flow uses split `Visibility` + `Editability` controls (same semantics as default-level access controls).
 
 ---
 
@@ -753,10 +763,6 @@ Performance expectations are tracked as product constraints:
 
 ---
 
-
-
-## 13. Technical Implementation
-
 Detailed technical design (data models, persistence keys, and runtime role/session handling) is maintained in:
 - `docs/TECHNICAL_DOCUMENTATION.md`
 
@@ -788,4 +794,3 @@ This PRD captures product behavior and acceptance-level requirements only.
 **Next Review:** April 2026
 
 ---
-

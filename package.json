@@ -2,7 +2,7 @@
   "name": "practice-settings-dashboard",
   "version": "1.0.0",
   "private": true,
-  "homepage": "https://sjsaama.github.io/settings_dashboard",
+  "homepage": "https://sjsaama.github.io/practice-settings-dashboard",
   "dependencies": {
     "lucide-react": "^0.263.1",
     "react": "^18.2.0",

@@ -33,13 +33,13 @@ export const settingsModules = {
     settings: [
       {
         id: 1,
-        name: 'Default Patient Pronoun',
+        name: 'Patient Pronoun in Generated Notes',
         type: 'dropdown',
         options: ['He', 'She', 'They'],
         default: 'They',
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: ''
+        subtext: 'Used when generating notes so pronoun references stay consistent when context is unclear.'
       },
       {
         id: 2,
@@ -181,6 +181,32 @@ export const settingsModules = {
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
         subtext: ''
+      },
+      {
+        id: 26,
+        name: 'EHR Pull Look ahead window',
+        type: 'range-selector',
+        options: [
+          '1 day', '2 days', '3 days', '4 days', '5 days', '6 days', '7 days',
+          '8 days', '9 days', '10 days', '11 days', '12 days', '13 days', '14 days'
+        ],
+        default: '8 days',
+        opsLockState: 'unlocked', // Ops controls PM access
+        pmLockState: 'unlocked',  // PM controls doctor access
+        subtext: 'Defines the future window from which appointments are pulled from EHR.'
+      },
+      {
+        id: 27,
+        name: 'Local cache window',
+        type: 'cache-window-combined',
+        options: [],
+        default: {
+          aheadDays: '8 days',
+          backDays: '7 days'
+        },
+        opsLockState: 'unlocked', // Ops controls PM access
+        pmLockState: 'unlocked',  // PM controls doctor access
+        subtext: 'Defines local DB cache window; this must stay within EHR pull window.'
       }
     ]
   },
@@ -215,9 +241,49 @@ export const settingsModules = {
     ]
   },
   'ehr-settings-amd': {
-    name: 'EHR Settings - AMD',
+    name: 'EHR Settings - AdvancedMD',
     subtitle: 'Settings that control AMD EHR integration and synchronization',
     settings: [
+      {
+        id: 90,
+        name: 'First-Visit Appointment Types',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Add appointment types that should be classified as first visits.'
+      },
+      {
+        id: 91,
+        name: 'Follow-Up Appointment Types',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Add appointment types that should be classified as follow-up visits.'
+      },
+      {
+        id: 121,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 122,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
       {
         id: 73,
         name: 'Daily appointment sync time',
@@ -231,7 +297,7 @@ export const settingsModules = {
         default: [],
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
+        subtext: 'Set the daily time for pulling appointments from EHR.'
       },
       {
         id: 76,
@@ -251,31 +317,55 @@ export const settingsModules = {
         default: 'Off',
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Automatically push completed notes to EHR system'
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
       },
-      {
-        id: 78,
-        name: 'Appointment Allowlist',
-        type: 'keyword-list',
-        options: [
-          'Initial Consultation',
-          'Follow-up',
-          'Annual Checkup',
-          'Routine Checkup',
-          'Physical Examination',
-          'Lab Results Review'
-        ],
-        default: [],
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Add appointment words/phrases to show. If none are added, all types are shown.'
-      }
+      
     ]
   },
   'ehr-settings-athena': {
-    name: 'EHR Settings - Athena',
+    name: 'EHR Settings - AthenaOne',
     subtitle: 'Settings that control Athena EHR integration and synchronization',
     settings: [
+      {
+        id: 94,
+        name: 'First-Visit Appointment Types',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Add appointment types that should be classified as first visits.'
+      },
+      {
+        id: 95,
+        name: 'Follow-Up Appointment Types',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Add appointment types that should be classified as follow-up visits.'
+      },
+      {
+        id: 123,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 124,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
       {
         id: 84,
         name: 'Enable Athena Embedded App',
@@ -310,7 +400,7 @@ export const settingsModules = {
         default: [],
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Times shown in selected timezone (30min increments). Max 6 times'
+        subtext: 'Set the daily time for pulling appointments from EHR.'
       },
       {
         id: 86,
@@ -330,24 +420,492 @@ export const settingsModules = {
         default: 'Off',
         opsLockState: 'unlocked', // Ops controls PM access
         pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Automatically push completed notes to EHR system'
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      },
+      
+    ]
+  },
+  'ehr-settings-ecw': {
+    name: 'EHR Settings - ECW',
+    subtitle: 'Settings that control ECW EHR integration and synchronization',
+    settings: [
+      {
+        id: 98,
+        name: 'First-Visit Appointment Types',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Add appointment types that should be classified as first visits.'
       },
       {
-        id: 89,
-        name: 'Appointment Allowlist',
+        id: 99,
+        name: 'Follow-Up Appointment Types',
         type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Add appointment types that should be classified as follow-up visits.'
+      },
+      {
+        id: 100,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 101,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 125,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
         options: [
-          'Initial Consultation',
-          'Follow-up',
-          'Annual Checkup',
-          'Routine Checkup',
-          'Physical Examination',
-          'Lab Results Review'
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
         ],
         default: [],
-        opsLockState: 'unlocked', // Ops controls PM access
-        pmLockState: 'unlocked',  // PM controls doctor access
-        subtext: 'Add appointment words/phrases to show. If none are added, all types are shown.'
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 126,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      },
+      {
+        id: 102,
+        name: 'Cancelled EHR Appointment Statuses',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Statuses that should be interpreted as cancelled.'
+      },
+      {
+        id: 103,
+        name: 'Rescheduled EHR Appointment Statuses',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Statuses that should be interpreted as rescheduled.'
+      }
+    ]
+  },
+  'ehr-settings-athenaflow': {
+    name: 'EHR Settings - Athenaflow',
+    subtitle: 'Settings that control Athenaflow-specific behavior',
+    settings: [
+      {
+        id: 104,
+        name: 'Ignore Pronoun Info From EHR',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'When enabled, Marvix ignores pronoun values received from Athenaflow EHR.'
+      },
+      {
+        id: 107,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 108,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 127,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 128,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-charm': {
+    name: 'EHR Settings - Charm',
+    subtitle: 'Settings that control Charm EHR integration',
+    settings: [
+      {
+        id: 109,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 110,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 129,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 130,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-drchrono': {
+    name: 'EHR Settings - DrChrono',
+    subtitle: 'Settings that control DrChrono EHR integration',
+    settings: [
+      {
+        id: 131,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 132,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 133,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 134,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-nereg': {
+    name: 'EHR Settings - Nereg',
+    subtitle: 'Settings that control Nereg EHR integration',
+    settings: [
+      {
+        id: 113,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 114,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 135,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 136,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-greenway': {
+    name: 'EHR Settings - Greenway',
+    subtitle: 'Settings that control Greenway EHR integration',
+    settings: [
+      {
+        id: 115,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 116,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 137,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 138,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-veradigm-allscripts': {
+    name: 'EHR Settings - Veradigm/Allscripts',
+    subtitle: 'Settings that control Veradigm/Allscripts EHR integration',
+    settings: [
+      {
+        id: 117,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 118,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 139,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 140,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-modmed': {
+    name: 'EHR Settings - Modmed',
+    subtitle: 'Settings that control Modmed EHR integration',
+    settings: [
+      {
+        id: 119,
+        name: 'Appointment Type Blocklist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will not be pulled from EHR.'
+      },
+      {
+        id: 120,
+        name: 'Appointment Type Allowlist',
+        type: 'keyword-list',
+        options: [],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Appointment types in this list will be pulled from EHR.'
+      },
+      {
+        id: 141,
+        name: 'Daily appointment sync time',
+        type: 'time-multiselect',
+        options: [
+          '5:00 AM', '5:30 AM', '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+          '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
+          '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
+          '5:00 PM'
+        ],
+        default: [],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Set the daily time for pulling appointments from EHR.'
+      },
+      {
+        id: 142,
+        name: 'Push to EHR automatically',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'If enabled, the note is pushed to EHR immediately after it is processed.'
+      }
+    ]
+  },
+  'ehr-settings-google-meet': {
+    name: 'EHR Settings - Google Meet',
+    subtitle: 'Settings that control Google Meet meeting bot behavior',
+    settings: [
+      {
+        id: 105,
+        name: 'Auto Schedule Meeting Bot',
+        type: 'toggle',
+        options: ['On', 'Off'],
+        default: 'Off',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Automatically schedule the meeting bot for eligible appointments.'
+      },
+      {
+        id: 106,
+        name: 'Meeting Bot Name',
+        type: 'text',
+        options: [],
+        default: '',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        subtext: 'Display name used by the meeting bot in Google Meet.'
       }
     ]
   },
@@ -376,5 +934,77 @@ export const settingsModules = {
         subtext: 'Connect Marvix app via Zoom marketplace. Consults via Zoom are not linked to an appointment - new consult is created.'
       }
     ]
+  },
+  'practice-properties': {
+    name: 'Practice Properties',
+    subtitle: 'Practice-level properties managed by Ops and Practice Managers',
+    settings: [
+      {
+        id: 121,
+        name: 'Org ID',
+        type: 'text',
+        options: [],
+        default: '',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        nonPropagatable: true,
+        subtext: 'Unique organization identifier used for this practice.'
+      },
+      {
+        id: 122,
+        name: 'Document Types',
+        type: 'multiselect',
+        options: ['SOAP Note', 'Progress Note', 'Discharge Summary', 'Referral Letter', 'Clinical Summary'],
+        default: ['SOAP Note', 'Progress Note'],
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        nonPropagatable: true,
+        subtext: 'Defines which document types are enabled at the practice level.'
+      },
+      {
+        id: 123,
+        name: 'EHR',
+        type: 'dropdown',
+        options: ['AdvancedMD', 'AthenaOne', 'ECW', 'Athenaflow', 'Charm', 'DrChrono', 'Nereg', 'Greenway', 'Veradigm/Allscripts', 'Modmed', 'Google Meet'],
+        default: 'AthenaOne',
+        opsLockState: 'unlocked',
+        pmLockState: 'unlocked',
+        nonPropagatable: true,
+        subtext: 'Primary EHR connected for this practice.'
+      }
+    ]
   }
+};
+
+const MODULE_CAPABILITIES = {
+  'note-settings': {
+    supportsUserOverrides: true,
+    usesVisibilityEditabilityUI: true
+  },
+  controls: {
+    supportsUserOverrides: true,
+    usesVisibilityEditabilityUI: false
+  },
+  'em-settings': {
+    supportsUserOverrides: true,
+    usesVisibilityEditabilityUI: false
+  }
+};
+
+export const getModuleCapabilities = (moduleId) => {
+  if (MODULE_CAPABILITIES[moduleId]) {
+    return MODULE_CAPABILITIES[moduleId];
+  }
+
+  if (moduleId?.startsWith('ehr-settings-')) {
+    return {
+      supportsUserOverrides: true,
+      usesVisibilityEditabilityUI: true
+    };
+  }
+
+  return {
+    supportsUserOverrides: false,
+    usesVisibilityEditabilityUI: false
+  };
 };

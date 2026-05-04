@@ -15,6 +15,12 @@ Each setting has:
 - **`opsLockState`**: controls **PM's** visibility/editing rights (Ops → PM)
 - **`pmLockState`**: controls **doctor** visibility/editing rights (PM → Doctor)
 
+UI parity note:
+- `note-settings` and all `ehr-settings-*` modules use the same PM-facing split controls:
+  - `Visibility` (`Show` / `Hide`)
+  - `Editability` (`Editable` / `Not editable` when visible)
+- These controls map to the same canonical lock states (`unlocked`, `locked-visible`, `locked-hidden`).
+
 Allowed lock values:
 - `unlocked`
 - `locked-visible`
@@ -68,6 +74,66 @@ This controls what doctors can see/change in the downstream doctor experience:
 - `locked-visible`: doctor can see but cannot change
 - `locked-hidden`: doctor cannot see the setting
 
+## Override/default case matrix (PM perspective)
+
+This section is the canonical matrix for the "override matches default" behavior.
+Standalone reference: `docs/OVERRIDE_DEFAULT_CASE_MATRIX.md`
+
+### Terminology mapping
+
+- `hidden` = `locked-hidden`
+- `show + editable` = `unlocked`
+- `show + not editable` = `locked-visible`
+
+### Case A: Setting editable by PM (Ops `opsLockState = unlocked`)
+
+PM default (`setting.pmLockState`) can be any of:
+- `locked-hidden`
+- `unlocked`
+- `locked-visible`
+
+PM override (`override.pmLockState`) can be any of:
+- `locked-hidden`
+- `unlocked`
+- `locked-visible`
+
+| PM Default State | Override State | Allowed | Result |
+|---|---|---|---|
+| `locked-hidden` (hidden) | `locked-hidden` (hidden) | ✅ | Redundant (matches default) |
+| `locked-hidden` (hidden) | `unlocked` (show + editable) | ✅ | Meaningful override |
+| `locked-hidden` (hidden) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
+| `unlocked` (show + editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
+| `unlocked` (show + editable) | `unlocked` (show + editable) | ✅ | Redundant (matches default) |
+| `unlocked` (show + editable) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
+| `locked-visible` (show + not editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
+| `locked-visible` (show + not editable) | `unlocked` (show + editable) | ✅ | Meaningful override |
+| `locked-visible` (show + not editable) | `locked-visible` (show + not editable) | ✅ | Redundant (matches default) |
+
+### Case B: Setting not editable by PM (Ops `opsLockState = locked-visible`)
+
+PM default (`setting.pmLockState`) can only be:
+- `locked-hidden` (hidden), or
+- `locked-visible` (show + not editable)
+
+PM override (`override.pmLockState`) can only be:
+- `locked-hidden` (hidden), or
+- `locked-visible` (show + not editable)
+
+`unlocked` (show + editable) is disallowed in this branch.
+
+| PM Default State | Override State | Allowed | Result |
+|---|---|---|---|
+| `locked-hidden` (hidden) | `locked-hidden` (hidden) | ✅ | Redundant (matches default) |
+| `locked-hidden` (hidden) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
+| `locked-visible` (show + not editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
+| `locked-visible` (show + not editable) | `locked-visible` (show + not editable) | ✅ | Redundant (matches default) |
+
+### Case C: Setting hidden from PM (Ops `opsLockState = locked-hidden`)
+
+- PM cannot see the setting.
+- PM cannot set default state or create/update overrides for that setting.
+- Existing overrides are removed on transition to this state (with warning/confirmation in the flow).
+
 ## Override constraints (no redundant overrides)
 
 An override must be meaningful:
@@ -81,6 +147,13 @@ Standard settings:
 `service-settings-combined`:
 - tuple includes `(enabledServices, defaultService, pmLockState)`
 - all components must match to be considered redundant
+
+### "Matches default" popup behavior
+
+- If PM attempts to create or keep an override with the same effective tuple as defaults, show the informational message and block/clean up the redundant override.
+- For standard settings, compare `(default, pmLockState)`.
+- For `service-settings-combined`, compare `(enabledServices, defaultService, pmLockState)`.
+- For lock-state-only changes, a matching `pmLockState` is enough to be redundant when value/defaultService also match effective defaults.
 
 ## PM dead-end recovery: Request Ops restore
 
