@@ -74,6 +74,20 @@ This controls what doctors can see/change in the downstream doctor experience:
 - `locked-visible`: doctor can see but cannot change
 - `locked-hidden`: doctor cannot see the setting
 
+## PM override access vs practice default (implemented)
+
+When PM creates or edits a **user override**, allowed override `pmLockState` depends on the **practice default** `pmLockState`:
+
+| Practice default (doctor) | Allowed override access | Notes |
+|---|---|---|
+| `unlocked` (editable) | `locked-visible`, `locked-hidden` only | Override cannot stay **editable** — user would change the value themselves. Default in UI: **not editable**. Value overrides auto-save as not editable. |
+| `locked-visible` or `locked-hidden` | `unlocked`, `locked-visible`, `locked-hidden` | PM may **loosen** one user to editable even when practice is not. |
+
+Enforced in:
+- `src/utils/overrideLockRules.js`
+- `AddOverrideModal` (access options + save)
+- `SettingRow` inline override confirm (`forcePmLockState`)
+
 ## Override/default case matrix (PM perspective)
 
 This section is the canonical matrix for the "override matches default" behavior.
@@ -92,10 +106,12 @@ PM default (`setting.pmLockState`) can be any of:
 - `unlocked`
 - `locked-visible`
 
-PM override (`override.pmLockState`) can be any of:
+PM override (`override.pmLockState`) when practice default is **not** doctor-editable can be any of:
 - `locked-hidden`
 - `unlocked`
 - `locked-visible`
+
+When practice default **is** doctor-editable (`unlocked`), override access is only `locked-visible` or `locked-hidden` (see section above).
 
 | PM Default State | Override State | Allowed | Result |
 |---|---|---|---|
@@ -103,7 +119,7 @@ PM override (`override.pmLockState`) can be any of:
 | `locked-hidden` (hidden) | `unlocked` (show + editable) | ✅ | Meaningful override |
 | `locked-hidden` (hidden) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
 | `unlocked` (show + editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
-| `unlocked` (show + editable) | `unlocked` (show + editable) | ✅ | Redundant (matches default) |
+| `unlocked` (show + editable) | `unlocked` (show + editable) | ❌ | Not offered (redundant; user can edit practice value) |
 | `unlocked` (show + editable) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
 | `locked-visible` (show + not editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
 | `locked-visible` (show + not editable) | `unlocked` (show + editable) | ✅ | Meaningful override |

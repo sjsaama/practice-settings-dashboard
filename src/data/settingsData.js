@@ -266,23 +266,13 @@ export const settingsModules = {
       },
       {
         id: 121,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 122,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 73,
@@ -348,23 +338,13 @@ export const settingsModules = {
       },
       {
         id: 123,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 124,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 84,
@@ -451,23 +431,13 @@ export const settingsModules = {
       },
       {
         id: 100,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 101,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 125,
@@ -532,23 +502,13 @@ export const settingsModules = {
       },
       {
         id: 107,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 108,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 127,
@@ -583,23 +543,13 @@ export const settingsModules = {
     settings: [
       {
         id: 109,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 110,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 129,
@@ -634,23 +584,13 @@ export const settingsModules = {
     settings: [
       {
         id: 131,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 132,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 133,
@@ -685,23 +625,13 @@ export const settingsModules = {
     settings: [
       {
         id: 113,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 114,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 135,
@@ -736,23 +666,13 @@ export const settingsModules = {
     settings: [
       {
         id: 115,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 116,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 137,
@@ -787,23 +707,13 @@ export const settingsModules = {
     settings: [
       {
         id: 117,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 118,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 139,
@@ -838,23 +748,13 @@ export const settingsModules = {
     settings: [
       {
         id: 119,
-        name: 'Appointment Type Blocklist',
-        type: 'keyword-list',
+        name: 'Appointment Type Pull Filter',
+        type: 'appointment-pull-filter-combined',
         options: [],
-        default: [],
+        default: { mode: 'none', types: [] },
         opsLockState: 'unlocked',
         pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will not be pulled from EHR.'
-      },
-      {
-        id: 120,
-        name: 'Appointment Type Allowlist',
-        type: 'keyword-list',
-        options: [],
-        default: [],
-        opsLockState: 'unlocked',
-        pmLockState: 'unlocked',
-        subtext: 'Appointment types in this list will be pulled from EHR.'
+        subtext: 'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.'
       },
       {
         id: 141,

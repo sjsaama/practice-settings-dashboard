@@ -10,6 +10,17 @@ import {
   getCacheWindowBounds,
   normalizeCacheWindowValue,
 } from '../../utils/syncWindowRules';
+import {
+  normalizeAppointmentPullFilter,
+  validateAppointmentPullFilter,
+  formatAppointmentPullFilterDisplay,
+} from '../../utils/appointmentPullFilter';
+import {
+  getAllowedOverrideLockStates,
+  getDefaultOverrideLockState,
+  practiceDefaultIsDoctorEditable,
+  resolveOverrideLockState,
+} from '../../utils/overrideLockRules';
 
 export default function AddOverrideModal({
   open,
@@ -50,6 +61,9 @@ export default function AddOverrideModal({
       }
       if (settingType === 'keyword-list' && overrideValue === '') {
         setOverrideValue(JSON.stringify(Array.isArray(defaultValue) ? defaultValue : []));
+      }
+      if (settingType === 'appointment-pull-filter-combined' && overrideValue === '') {
+        setOverrideValue(JSON.stringify(normalizeAppointmentPullFilter(defaultValue)));
       }
     }
   }, [open, currentOverrideSetting, overrideValue]);
@@ -127,11 +141,22 @@ export default function AddOverrideModal({
   const rangeSelectorOptions = Array.isArray(settingOptions) && settingOptions.length > 0
     ? settingOptions
     : buildDayOptions(MAX_WINDOW_DAYS);
+  const allowedOverrideLockStates = getAllowedOverrideLockStates(setting, {
+    isLockedVisibleByOps,
+  });
+  const practiceEditable = practiceDefaultIsDoctorEditable(setting);
   const overrideVisibility = overrideLockState === 'locked-hidden' ? 'hidden' : 'shown';
   const overrideEditability = overrideLockState === 'unlocked' ? 'editable' : 'not-editable';
-  const canSetOverrideEditable = !isLockedVisibleByOps;
-  const canSetOverrideNotEditable = true;
-  const canSetOverrideHidden = true;
+  const canSetOverrideEditable = allowedOverrideLockStates.includes('unlocked');
+  const canSetOverrideNotEditable = allowedOverrideLockStates.includes('locked-visible');
+  const canSetOverrideHidden = allowedOverrideLockStates.includes('locked-hidden');
+
+  useEffect(() => {
+    if (!open || !setting || !practiceEditable) return;
+    if (overrideLockState === 'unlocked') {
+      setOverrideLockState('locked-visible');
+    }
+  }, [open, setting, practiceEditable, overrideLockState]);
   const ToggleSwitch = ({ checked, onChange, disabled, onLabel, offLabel }) => (
     <div className="flex items-center gap-3">
       <span className={`text-xs ${!checked ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>{offLabel}</span>
@@ -275,7 +300,16 @@ export default function AddOverrideModal({
       return;
     }
 
-    if (!isMasterUser() && isLockedVisibleByOps && !['locked-visible', 'locked-hidden'].includes(overrideLockState)) {
+    if (!allowedOverrideLockStates.includes(overrideLockState)) {
+      alert(
+        practiceEditable
+          ? 'Practice default is editable. Override access must be "Shown, not editable" or Hidden.'
+          : 'That access option is not allowed for this setting.'
+      );
+      return;
+    }
+
+    if (!isMasterUser() && isLockedVisibleByOps && !allowedOverrideLockStates.includes(overrideLockState)) {
       alert(
         usesVisibilityEditabilityUI
           ? 'Edit not allowed. You can only choose "Shown, not editable" or Hidden.'
@@ -302,7 +336,8 @@ export default function AddOverrideModal({
       settingType === 'multiselect' ||
       settingType === 'keyword-list' ||
       settingType === 'service-settings-combined' ||
-      settingType === 'cache-window-combined'
+      settingType === 'cache-window-combined' ||
+      settingType === 'appointment-pull-filter-combined'
     ) {
       if (typeof valueToSet === 'string' && valueToSet !== '') {
         try {
@@ -342,6 +377,14 @@ export default function AddOverrideModal({
         autoPullInEmbeddedApp: overrideValue === 'embedded-and-auto-pull' ? 'Yes' : 'No'
       };
     }
+    if (settingType === 'appointment-pull-filter-combined') {
+      valueToSet = normalizeAppointmentPullFilter(valueToSet);
+      const validationError = validateAppointmentPullFilter(valueToSet, { strict: true });
+      if (validationError) {
+        alert(validationError);
+        return;
+      }
+    }
 
     const wouldMatchDefault = doesOverrideMatchDefault(
       selectedUserId,
@@ -353,7 +396,13 @@ export default function AddOverrideModal({
     );
 
     if (!isMasterUser() && isLockedVisibleByOps) {
-      setUserSetting(selectedUserId, moduleId, settingId, 'pmLockState', overrideLockState);
+      setUserSetting(
+        selectedUserId,
+        moduleId,
+        settingId,
+        'pmLockState',
+        resolveOverrideLockState(setting, overrideLockState, valueToSet)
+      );
       resetAndClose();
       return;
     }
@@ -365,7 +414,13 @@ export default function AddOverrideModal({
         return;
       }
       setUserSetting(selectedUserId, moduleId, settingId, 'value', valueToSet);
-      setUserSetting(selectedUserId, moduleId, settingId, 'pmLockState', overrideLockState);
+      setUserSetting(
+        selectedUserId,
+        moduleId,
+        settingId,
+        'pmLockState',
+        resolveOverrideLockState(setting, overrideLockState, valueToSet)
+      );
     } else {
       if (wouldMatchDefault) {
         setValidationError(getMatchingOverrideAlertMessage(valueToSet, overrideLockState));
@@ -373,7 +428,13 @@ export default function AddOverrideModal({
       }
 
       setUserSetting(selectedUserId, moduleId, settingId, 'value', valueToSet);
-      setUserSetting(selectedUserId, moduleId, settingId, 'pmLockState', overrideLockState);
+      setUserSetting(
+        selectedUserId,
+        moduleId,
+        settingId,
+        'pmLockState',
+        resolveOverrideLockState(setting, overrideLockState, valueToSet)
+      );
     }
 
     if (settingType === 'service-settings-combined' && overrideDefaultService) {
@@ -424,6 +485,8 @@ export default function AddOverrideModal({
                 ? `Embedded: ${defaultValue?.enableEmbeddedApp || 'No'} | Auto Pull: ${defaultValue?.autoPullInEmbeddedApp || 'No'}`
                 : settingType === 'cache-window-combined'
                 ? `Ahead: ${defaultValue?.aheadDays || '8 days'} | Back: ${defaultValue?.backDays || '7 days'}`
+                : settingType === 'appointment-pull-filter-combined'
+                ? formatAppointmentPullFilterDisplay(defaultValue)
                 : (Array.isArray(defaultValue) ? defaultValue.join(', ') : defaultValue)}
             </p>
           </div>
@@ -432,7 +495,13 @@ export default function AddOverrideModal({
             <label className="text-sm font-medium text-gray-700 block mb-2">Select user:</label>
             <select
               value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value)}
+              onChange={(e) => {
+                const nextUserId = e.target.value;
+                setSelectedUserId(nextUserId);
+                if (nextUserId && !overrideLockState) {
+                  setOverrideLockState(getDefaultOverrideLockState(setting));
+                }
+              }}
               className="w-full px-4 py-3 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">-- Select a user --</option>
@@ -634,6 +703,46 @@ export default function AddOverrideModal({
                   })}
                 </div>
               )}
+              {settingType === 'appointment-pull-filter-combined' && (() => {
+                let parsed = normalizeAppointmentPullFilter(defaultValue);
+                try {
+                  if (overrideValue) parsed = normalizeAppointmentPullFilter(JSON.parse(overrideValue));
+                } catch {
+                  // keep default parse
+                }
+                const setParsed = (next) => setOverrideValue(JSON.stringify(next));
+                return (
+                  <div className="space-y-3">
+                    <select
+                      value={parsed.mode}
+                      onChange={(e) => {
+                        const mode = e.target.value;
+                        if (mode === 'none') setParsed({ mode: 'none', types: [] });
+                        else setParsed({ mode, types: mode === parsed.mode ? parsed.types : [] });
+                      }}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-md text-sm"
+                    >
+                      <option value="none">No filter</option>
+                      <option value="allowlist">Allowlist</option>
+                      <option value="blocklist">Blocklist</option>
+                    </select>
+                    {parsed.mode !== 'none' && (
+                      <textarea
+                        value={parsed.types.join('\n')}
+                        onChange={(e) => {
+                          const types = e.target.value
+                            .split(/[\n,;]/g)
+                            .map((t) => t.trim())
+                            .filter(Boolean);
+                          setParsed({ ...parsed, types });
+                        }}
+                        placeholder="One appointment type per line"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-md text-sm min-h-[88px]"
+                      />
+                    )}
+                  </div>
+                );
+              })()}
               {settingType === 'keyword-list' && (
                 <div className="space-y-2">
                   <textarea
@@ -740,9 +849,24 @@ export default function AddOverrideModal({
           {selectedUserId && isLockedVisibleByOps && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
               <p className="text-xs text-amber-800">
-                {usesVisibilityEditabilityUI
-                  ? 'Edit not allowed: only "Shown, not editable" or Hidden are allowed.'
-                  : 'Edit not allowed: only "Shown, not editable" or Hidden are allowed.'}
+                Edit not allowed: only &quot;Shown, not editable&quot; or Hidden are allowed.
+              </p>
+            </div>
+          )}
+
+          {selectedUserId && practiceEditable && !isLockedVisibleByOps && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <p className="text-xs text-blue-900">
+                Practice default is editable for doctors. Overrides for this user can only be{' '}
+                <strong>not editable</strong> or <strong>hidden</strong> so they cannot change the value themselves.
+              </p>
+            </div>
+          )}
+
+          {selectedUserId && !practiceEditable && !isLockedVisibleByOps && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+              <p className="text-xs text-green-900">
+                Practice default is not editable. You may make this setting <strong>editable</strong> for this user only.
               </p>
             </div>
           )}
@@ -763,7 +887,17 @@ export default function AddOverrideModal({
                     <label className="text-sm font-medium text-gray-700 block mb-2">Visibility:</label>
                     <ToggleSwitch
                       checked={overrideVisibility === 'shown'}
-                      onChange={(isShown) => setOverrideLockState(isShown ? (overrideEditability === 'editable' ? 'unlocked' : 'locked-visible') : 'locked-hidden')}
+                      onChange={(isShown) => {
+                        if (!isShown) {
+                          setOverrideLockState('locked-hidden');
+                          return;
+                        }
+                        setOverrideLockState(
+                          canSetOverrideEditable && overrideEditability === 'editable'
+                            ? 'unlocked'
+                            : 'locked-visible'
+                        );
+                      }}
                       disabled={!canSetOverrideHidden && overrideVisibility === 'shown'}
                       onLabel="Shown"
                       offLabel="Hidden"
@@ -786,8 +920,8 @@ export default function AddOverrideModal({
               ) : (
                 <>
                   <label className="text-sm font-medium text-gray-700 block mb-2">User access:</label>
-                  <div className={`grid gap-2 ${isLockedVisibleByOps ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                    {(isLockedVisibleByOps ? ['locked-visible', 'locked-hidden'] : ['unlocked', 'locked-visible', 'locked-hidden']).map((lock) => (
+                  <div className={`grid gap-2 ${allowedOverrideLockStates.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {allowedOverrideLockStates.map((lock) => (
                       <button
                         key={lock}
                         onClick={() => setOverrideLockState(lock)}

@@ -11,6 +11,12 @@ import {
   getCacheWindowBounds,
   normalizeCacheWindowValue,
 } from '../../utils/syncWindowRules';
+import {
+  normalizeAppointmentPullFilter,
+  validateAppointmentPullFilter,
+  formatAppointmentPullFilterDisplay,
+} from '../../utils/appointmentPullFilter';
+import { shouldForceNotEditableOnValueOverride } from '../../utils/overrideLockRules';
 
 export default function SettingRow({
   setting,
@@ -101,6 +107,16 @@ export default function SettingRow({
       (!isUser && !isEnabled) ||
       (!isMasterUser() && isPMReadOnly);
 
+    const applyAppointmentPullFilterChange = (rawValue, { strict = false } = {}) => {
+      const normalized = normalizeAppointmentPullFilter(rawValue);
+      const validationError = validateAppointmentPullFilter(normalized, { strict });
+      if (validationError) {
+        alert(validationError);
+        return;
+      }
+      handleChange(normalized);
+    };
+
     const handleChange = (newValue) => {
       if (!isUser && isPMLockedByOps) return;
       if (isUserLockedHidden) return;
@@ -123,7 +139,10 @@ export default function SettingRow({
             settingId: setting.id,
             settingName: setting.name,
             newValue,
-            defaultValue: setting.default
+            defaultValue: setting.default,
+            forcePmLockState: shouldForceNotEditableOnValueOverride(setting, newValue)
+              ? 'locked-visible'
+              : undefined,
           });
           setShowOverrideConfirmModal(true);
         } else if (currentUserSetting && (currentUserSetting.value !== undefined || currentUserSetting.pmLockState !== undefined)) {
@@ -493,6 +512,131 @@ export default function SettingRow({
           </div>
         );
       }
+      case 'appointment-pull-filter-combined': {
+        const normalized = normalizeAppointmentPullFilter(value);
+        const tokens = Array.isArray(normalized.types) ? normalized.types : [];
+
+        const normalizeDraftIntoTokens = (draft) => {
+          if (!draft || typeof draft !== 'string') return [];
+          return draft
+            .split(/[,;\n]/g)
+            .map((t) => t.trim())
+            .filter(Boolean);
+        };
+
+        const dedupePreserveOrder = (arr) => {
+          const out = [];
+          const seen = new Set();
+          for (const item of arr) {
+            if (seen.has(item)) continue;
+            seen.add(item);
+            out.push(item);
+          }
+          return out;
+        };
+
+        const pushFilter = (nextPartial) => {
+          applyAppointmentPullFilterChange({ ...normalized, ...nextPartial });
+        };
+
+        const handleAddFromDraft = () => {
+          if (isDefaultReadOnly || normalized.mode === 'none') return;
+          const incomingTokens = normalizeDraftIntoTokens(keywordDraft);
+          if (incomingTokens.length === 0) return;
+          applyAppointmentPullFilterChange(
+            { ...normalized, types: dedupePreserveOrder([...tokens, ...incomingTokens]) },
+            { strict: false }
+          );
+          setKeywordDraft('');
+        };
+
+        const handleRemoveToken = (token) => {
+          if (isDefaultReadOnly || normalized.mode === 'none') return;
+          pushFilter({ types: tokens.filter((t) => t !== token) });
+        };
+
+        return (
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 block">Filter mode</label>
+              <select
+                value={normalized.mode}
+                disabled={isDefaultReadOnly}
+                onChange={(e) => {
+                  const nextMode = e.target.value;
+                  const nextValue =
+                    nextMode === 'none'
+                      ? { mode: 'none', types: [] }
+                      : {
+                          mode: nextMode,
+                          types: nextMode === normalized.mode ? tokens : [],
+                        };
+                  handleChange(nextValue);
+                }}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="none">No filter (pull all types)</option>
+                <option value="allowlist">Allowlist — only pull these types</option>
+                <option value="blocklist">Blocklist — do not pull these types</option>
+              </select>
+            </div>
+
+            {normalized.mode !== 'none' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700 block">
+                  {normalized.mode === 'allowlist' ? 'Allowed types' : 'Blocked types'}
+                </label>
+                <div className="flex items-start gap-2">
+                  <input
+                    type="text"
+                    value={keywordDraft}
+                    onChange={(e) => setKeywordDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddFromDraft();
+                      }
+                    }}
+                    disabled={isDefaultReadOnly}
+                    placeholder="Type appointment type and press Enter"
+                    className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddFromDraft}
+                    disabled={isDefaultReadOnly}
+                    className="shrink-0 px-4 py-3 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {tokens.length > 0 ? (
+                    tokens.map((token) => (
+                      <span
+                        key={token}
+                        className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 border border-gray-200"
+                      >
+                        <span className="text-xs text-gray-900">{token}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveToken(token)}
+                          disabled={isDefaultReadOnly}
+                          className="text-xs font-medium text-gray-500 hover:text-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-gray-500">No types added yet.</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
       case 'keyword-list': {
         const tokens = Array.isArray(value) ? value : [];
 
@@ -748,6 +892,9 @@ export default function SettingRow({
         maxBackDays: MAX_WINDOW_DAYS
       });
       return `Ahead: ${normalized.aheadDays}; Back: ${normalized.backDays}`;
+    }
+    if (setting.type === 'appointment-pull-filter-combined') {
+      return formatAppointmentPullFilterDisplay(overrideValue);
     }
     return Array.isArray(overrideValue) ? overrideValue.join(', ') : String(overrideValue);
   };

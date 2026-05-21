@@ -128,19 +128,25 @@ Canonical fields in new records:
 
 ### 3.4 EHR Appointment Pull Filters
 
-Each EHR module now carries both pull-filter settings:
+Each EHR module carries one combined pull-filter setting:
 
-- `Appointment Type Allowlist`
-- `Appointment Type Blocklist`
+- `Appointment Type Pull Filter` (`appointment-pull-filter-combined`)
+
+Value shape:
+
+```javascript
+{ mode: 'none' | 'allowlist' | 'blocklist', types: string[] }
+```
 
 Behavior:
 
-- Both values are stored in each setting's `default` as `string[]`.
-- `Appointment Type Allowlist`: appointment types that will be pulled from EHR.
-- `Appointment Type Blocklist`: appointment types that will not be pulled from EHR.
-- If an appointment type exists in both lists, blocklist takes precedence.
-- Empty allowlist means unrestricted unless blocked.
-- Existing allowlist filtering is centralized in `src/utils/appointmentAllowlist.js`.
+- `none`: pull all appointment types (no type filter).
+- `allowlist`: only pull types in `types`.
+- `blocklist`: pull all types except those in `types`.
+- Allowlist and blocklist cannot both be active; validation blocks empty `types` when mode is not `none`.
+- Legacy saved data with separate blocklist/allowlist rows is merged on load via `settingsNormalization.js`.
+- Filtering helpers live in `src/utils/appointmentPullFilter.js`.
+- If practice default is doctor-editable (`pmLockState: unlocked`), a user override that changes the filter value auto-locks the doctor to `locked-visible`.
 
 ### 3.5 EHR Sync and Push Controls
 

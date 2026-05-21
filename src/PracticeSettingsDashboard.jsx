@@ -70,9 +70,10 @@ import {
 } from './utils/syncWindowRules';
 import { normalizeDependentSettings } from './utils/settingsNormalization';
 import {
-  filterAppointmentsByAllowlist,
-  getAppointmentAllowlist,
-} from './utils/appointmentAllowlist';
+  filterAppointmentsByPullFilter,
+  getAppointmentPullFilterSetting,
+  normalizeAppointmentPullFilter,
+} from './utils/appointmentPullFilter';
 import { seededLinkedAssignmentCandidates } from './data/linkedAssignmentCandidates';
 
 const mergeModuleSettingsWithSeed = (seededModules, savedModules) => {
@@ -108,6 +109,11 @@ const mergeModuleSettingsWithSeed = (seededModules, savedModules) => {
         if (!savedSetting) return seededSetting;
 
         const mergedDefault = (() => {
+          if (seededSetting.type === 'appointment-pull-filter-combined') {
+            const incoming = savedSetting.default;
+            return normalizeAppointmentPullFilter(incoming);
+          }
+
           if (seededSetting.type !== 'email-delivery-combined') {
             return savedSetting.default !== undefined ? savedSetting.default : seededSetting.default;
           }
@@ -558,8 +564,8 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     return athenaEnabled ? 'ehr-settings-athena' : 'ehr-settings-amd';
   }, [moduleSettings]);
 
-  const activeAppointmentAllowlist = useMemo(
-    () => getAppointmentAllowlist(moduleSettings, activeEhrModuleKey),
+  const activeAppointmentPullFilter = useMemo(
+    () => getAppointmentPullFilterSetting(moduleSettings, activeEhrModuleKey),
     [moduleSettings, activeEhrModuleKey]
   );
 
@@ -925,7 +931,11 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
     setModuleSettings(prev => {
       const nextSettings = prev[moduleId].settings.map((setting) => {
         if (setting.id !== settingId) return setting;
-        return { ...setting, [property]: value };
+        const nextValue =
+          property === 'default' && setting.type === 'appointment-pull-filter-combined'
+            ? normalizeAppointmentPullFilter(value)
+            : value;
+        return { ...setting, [property]: nextValue };
       });
 
       if (moduleId === 'controls' && property === 'default') {
@@ -1757,12 +1767,12 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
                       return matches;
                     });
 
-                    const allowlistFiltered = filterAppointmentsByAllowlist(
+                    const pullFilterFiltered = filterAppointmentsByPullFilter(
                       filtered,
-                      activeAppointmentAllowlist
+                      activeAppointmentPullFilter
                     );
 
-                    setDeletedConsults(allowlistFiltered);
+                    setDeletedConsults(pullFilterFiltered);
                     setSelectedConsults([]); // Reset selection when new search is performed
                   }}
                   className="mt-4 px-6 py-3 rounded-lg font-medium transition-colors bg-green-600 text-white hover:bg-green-700"
@@ -2528,6 +2538,15 @@ const PracticeSettingsDashboard = ({ authSession, practiceId, practiceName, onLo
               propertyToUpdate,
               pendingSettingChange.newValue
             );
+            if (pendingSettingChange.forcePmLockState) {
+              setUserSetting(
+                pendingSettingChange.userId,
+                pendingSettingChange.moduleId,
+                pendingSettingChange.settingId,
+                'pmLockState',
+                pendingSettingChange.forcePmLockState
+              );
+            }
           }
           setShowOverrideConfirmModal(false);
           setPendingSettingChange(null);

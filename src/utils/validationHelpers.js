@@ -72,3 +72,5 @@ This setting would have:
 
 Which is the same as the practice-wide default. An override must differ from the default.`;
 };
+
+export { validateAppointmentPullFilter } from './appointmentPullFilter';

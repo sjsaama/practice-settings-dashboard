@@ -1,3 +1,65 @@
+import {
+  LEGACY_APPOINTMENT_FILTER_PAIRS,
+  normalizeAppointmentPullFilter,
+  APPOINTMENT_PULL_FILTER_SETTING_NAME,
+} from './appointmentPullFilter';
+
+function normalizeEhrAppointmentPullFilters(moduleId, workingSettings) {
+  const pair = LEGACY_APPOINTMENT_FILTER_PAIRS[moduleId];
+  if (!pair) return { settings: workingSettings, didChange: false };
+
+  const [blocklistId, allowlistId] = pair;
+  const blocklistIndex = workingSettings.findIndex((s) => s.id === blocklistId);
+  const allowlistIndex = workingSettings.findIndex((s) => s.id === allowlistId);
+  const combinedIndex = workingSettings.findIndex((s) => s.type === 'appointment-pull-filter-combined');
+
+  if (combinedIndex >= 0 && blocklistIndex < 0 && allowlistIndex < 0) {
+    const combined = workingSettings[combinedIndex];
+    const normalizedDefault = normalizeAppointmentPullFilter(combined.default);
+    if (JSON.stringify(combined.default) !== JSON.stringify(normalizedDefault)) {
+      const next = [...workingSettings];
+      next[combinedIndex] = { ...combined, default: normalizedDefault };
+      return { settings: next, didChange: true };
+    }
+    return { settings: workingSettings, didChange: false };
+  }
+
+  if (blocklistIndex < 0) return { settings: workingSettings, didChange: false };
+
+  const blocklistSetting = workingSettings[blocklistIndex];
+  const allowlistSetting = allowlistIndex >= 0 ? workingSettings[allowlistIndex] : null;
+
+  const alreadyCombined =
+    blocklistSetting?.type === 'appointment-pull-filter-combined' &&
+    allowlistIndex < 0;
+  if (alreadyCombined) return { settings: workingSettings, didChange: false };
+
+  const normalizedDefault = normalizeAppointmentPullFilter(
+    blocklistSetting?.type === 'appointment-pull-filter-combined'
+      ? blocklistSetting.default
+      : null,
+    blocklistSetting?.default,
+    allowlistSetting?.default
+  );
+
+  const normalizedSetting = {
+    ...blocklistSetting,
+    name: APPOINTMENT_PULL_FILTER_SETTING_NAME,
+    type: 'appointment-pull-filter-combined',
+    default: normalizedDefault,
+    subtext:
+      'Filter which appointment types are pulled from EHR. Choose allowlist OR blocklist — not both.',
+  };
+
+  let next = [...workingSettings];
+  next[blocklistIndex] = normalizedSetting;
+  if (allowlistIndex >= 0) {
+    next = next.filter((s) => s.id !== allowlistId);
+  }
+
+  return { settings: next, didChange: true };
+}
+
 export function normalizeDependentSettings(moduleSettings) {
   let didChange = false;
 
@@ -108,6 +170,12 @@ export function normalizeDependentSettings(moduleSettings) {
             workingSettings = filtered;
           }
         }
+      }
+
+      if (moduleId.startsWith('ehr-settings-')) {
+        const ehrResult = normalizeEhrAppointmentPullFilters(moduleId, workingSettings);
+        workingSettings = ehrResult.settings;
+        if (ehrResult.didChange) didChange = true;
       }
 
       const nextSettings = workingSettings.map((setting) => {
