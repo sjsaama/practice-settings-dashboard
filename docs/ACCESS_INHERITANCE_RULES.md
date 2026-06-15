@@ -115,7 +115,7 @@ When practice default **is** doctor-editable (`unlocked`), override access is on
 
 | PM Default State | Override State | Allowed | Result |
 |---|---|---|---|
-| `locked-hidden` (hidden) | `locked-hidden` (hidden) | ✅ | Redundant (matches default) |
+| `locked-hidden` (hidden) | `locked-hidden` (hidden) | ❌ | Redundant (matches default) |
 | `locked-hidden` (hidden) | `unlocked` (show + editable) | ✅ | Meaningful override |
 | `locked-hidden` (hidden) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
 | `unlocked` (show + editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
@@ -123,7 +123,7 @@ When practice default **is** doctor-editable (`unlocked`), override access is on
 | `unlocked` (show + editable) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
 | `locked-visible` (show + not editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
 | `locked-visible` (show + not editable) | `unlocked` (show + editable) | ✅ | Meaningful override |
-| `locked-visible` (show + not editable) | `locked-visible` (show + not editable) | ✅ | Redundant (matches default) |
+| `locked-visible` (show + not editable) | `locked-visible` (show + not editable) |  ❌  | Redundant (matches default) |
 
 ### Case B: Setting not editable by PM (Ops `opsLockState = locked-visible`)
 
@@ -139,10 +139,10 @@ PM override (`override.pmLockState`) can only be:
 
 | PM Default State | Override State | Allowed | Result |
 |---|---|---|---|
-| `locked-hidden` (hidden) | `locked-hidden` (hidden) | ✅ | Redundant (matches default) |
+| `locked-hidden` (hidden) | `locked-hidden` (hidden) |  ❌  | Redundant (matches default) |
 | `locked-hidden` (hidden) | `locked-visible` (show + not editable) | ✅ | Meaningful override |
 | `locked-visible` (show + not editable) | `locked-hidden` (hidden) | ✅ | Meaningful override |
-| `locked-visible` (show + not editable) | `locked-visible` (show + not editable) | ✅ | Redundant (matches default) |
+| `locked-visible` (show + not editable) | `locked-visible` (show + not editable) |  ❌  | Redundant (matches default) |
 
 ### Case C: Setting hidden from PM (Ops `opsLockState = locked-hidden`)
 
