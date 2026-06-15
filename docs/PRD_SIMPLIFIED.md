@@ -291,12 +291,12 @@ If Ops changes default to Central:
 - Delete overrides (user reverts to default immediately)
 
 **Master User (Ops) Current Prototype Behavior:**
-- Cannot create, edit, or remove user overrides
-- Can view override summaries in read-only mode for audit/review
-- Can only manage setting defaults and `opsLockState`
+- Can create, edit, or remove user overrides
 - Rollout migration clears existing stored overrides once per practice
 
 ---
+
+### THESE FEATURES ARE IN V2
 
 ### 5.5 Linked Assignments (Prototype)
 
