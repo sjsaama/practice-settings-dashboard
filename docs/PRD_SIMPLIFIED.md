@@ -97,7 +97,7 @@ Every setting has two lock controls:
 | Value | PM Can See | PM Can Edit Default | PM Can Change Lock State | PM Can Create Overrides | Use Case |
 |-------|-----------|---------------------|--------------------------|------------------------|----------|
 | **unlocked** 👁️ | ✅ Yes | ✅ Yes | ✅ Yes (all) | ✅ Yes | Practice-customizable (timezone, pronouns) |
-| **locked-visible** 🔒 | ✅ Yes | ❌ No | ✅ Yes (`locked-visible` / `locked-hidden` only) | ❌ No (value overrides) | Organization standards, compliance |
+| **locked-visible** 🔒 | ✅ Yes | ❌ No | ✅ Yes (`locked-visible` / `locked-hidden` only) | ❌ No (value overrides), Can show/hide the settings | Organization standards, compliance |
 | **locked-hidden** 👁️‍🗨️ | ❌ No | ❌ No | ❌ No | ❌ No | Sensitive configs, billing, technical |
 
 **Set By:** Master User (Ops)
